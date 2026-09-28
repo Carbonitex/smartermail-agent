@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Core, the three shared tool libraries and the MCP host library. Gates the McpUser, McpAdmin and
+       Agent images (each Dockerfile runs it before dotnet publish). Must stay fast and offline. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>SmarterMail.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Core/SmarterMailMcp.Core.csproj" />
+    <ProjectReference Include="../../src/Tools.Mailbox/SmarterMail.Tools.Mailbox.csproj" />
+    <ProjectReference Include="../../src/Tools.DomainAdmin/SmarterMail.Tools.DomainAdmin.csproj" />
+    <ProjectReference Include="../../src/Tools.SysAdmin/SmarterMail.Tools.SysAdmin.csproj" />
+    <ProjectReference Include="../../src/Mcp.Hosting/SmarterMailMcp.Hosting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,19 @@
+<Project>
+
+  <!-- Shared by every project under src/ and tests/ -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- New warnings (nullable or otherwise) fail the build -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- ...except NuGet vulnerability advisories: a newly published advisory must not block every
+         auto-deploy. They still print as warnings; upgrade the package when one appears. -->
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <!-- Releases pass -p:Version=X.Y.Z (the Dockerfiles' VERSION build arg); anything else is a dev build -->
+    <Version Condition="'$(Version)' == ''">0.0.0-dev</Version>
+    <Authors>SmarterMail Agent contributors</Authors>
+    <Copyright>Copyright (c) SmarterMail Agent contributors. MIT License.</Copyright>
+  </PropertyGroup>
+
+</Project>

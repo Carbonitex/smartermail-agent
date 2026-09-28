@@ -1,0 +1,34 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Agent/">
+    <Project Path="src/Agent/SmarterMailAgent.csproj" />
+  </Folder>
+  <Folder Name="/src/Core/">
+    <Project Path="src/Core/SmarterMailMcp.Core.csproj" />
+  </Folder>
+  <Folder Name="/src/Mcp.Hosting/">
+    <Project Path="src/Mcp.Hosting/SmarterMailMcp.Hosting.csproj" />
+  </Folder>
+  <Folder Name="/src/McpAdmin/">
+    <Project Path="src/McpAdmin/SmarterMailMcp.Admin.csproj" />
+  </Folder>
+  <Folder Name="/src/McpUser/">
+    <Project Path="src/McpUser/SmarterMailMcp.User.csproj" />
+  </Folder>
+  <Folder Name="/src/Tools.DomainAdmin/">
+    <Project Path="src/Tools.DomainAdmin/SmarterMail.Tools.DomainAdmin.csproj" />
+  </Folder>
+  <Folder Name="/src/Tools.Mailbox/">
+    <Project Path="src/Tools.Mailbox/SmarterMail.Tools.Mailbox.csproj" />
+  </Folder>
+  <Folder Name="/src/Tools.SysAdmin/">
+    <Project Path="src/Tools.SysAdmin/SmarterMail.Tools.SysAdmin.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/Agent.Tests/">
+    <Project Path="tests/Agent.Tests/SmarterMailAgent.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/SmarterMail.Tests/">
+    <Project Path="tests/SmarterMail.Tests/SmarterMail.Tests.csproj" />
+  </Folder>
+</Solution>

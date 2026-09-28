@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SmarterMail Agent — chat with your own mailbox</title>
+<meta name="description" content="Log in to your own SmarterMail server, bring your own OpenRouter key, and chat with an AI agent that has your full mailbox toolset. Nothing is stored.">
+<meta name="robots" content="index, follow">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:title" content="SmarterMail Agent">
+<meta property="og:description" content="Your server, your key, nothing stored.">
+<link rel="stylesheet" href="./css/mail-agent.css">
+</head>
+<body>
+
+<!-- ------------------------------------------------------------ login view -->
+<main id="view-login" class="view login-view">
+  <section class="panel login-panel">
+    <header class="login-header">
+      <div class="login-icon" aria-hidden="true">✉️</div>
+      <h1 id="login-title">SmarterMail Agent</h1>
+      <p id="login-tagline" class="tagline">Chat with your own mailbox. Your server, your key, nothing stored.</p>
+    </header>
+
+    <section id="remembered-panel" class="remembered-panel" aria-live="polite" hidden>
+      <p id="remembered-text"></p>
+      <div class="remembered-actions">
+        <button id="btn-resume" type="button" class="btn btn-primary">Sign back in</button>
+        <button id="btn-forget-device" type="button" class="btn btn-ghost">Forget this device</button>
+      </div>
+    </section>
+
+    <form id="login-form" autocomplete="on" novalidate>
+      <fieldset class="field-group">
+        <legend id="login-legend">Your SmarterMail</legend>
+
+        <label for="f-hostname">Server hostname</label>
+        <input id="f-hostname" name="hostname" type="text" inputmode="url" spellcheck="false"
+               autocapitalize="none" autocorrect="off" placeholder="mail.example.com" required>
+        <p class="hint">Just the host. HTTPS is required; private/internal addresses are refused.</p>
+
+        <label for="f-email">Email address</label>
+        <input id="f-email" name="email" type="text" inputmode="email" autocomplete="username" spellcheck="false"
+               autocapitalize="none" placeholder="you@example.com" required>
+        <p class="hint">A domain admin signs in with their email address; a system admin with their admin username.</p>
+
+        <label for="f-password">Password</label>
+        <input id="f-password" name="password" type="password" autocomplete="current-password" required>
+        <p class="hint">Sent once to your own server to get a token. Never stored, never logged, never written to disk.</p>
+
+        <label class="checkbox">
+          <input id="f-allow-changes" type="checkbox">
+          <span><strong>Allow changes</strong> (send, move, delete)<br>
+          <span class="hint inline">Off by default: the agent gets read-only tools only.</span></span>
+        </label>
+
+        <div id="remember-options" hidden>
+          <label class="checkbox">
+            <input id="f-remember" type="checkbox">
+            <span><strong>Remember me on this device</strong><br>
+            <span id="remember-hint" class="hint inline">Stay signed in across restarts. Your password is not kept: this browser holds a
+              sealed token only this service can open. Anyone with this browser profile can use it until you log out.</span></span>
+          </label>
+          <label id="lock-option" class="checkbox checkbox-sub" hidden>
+            <input id="f-passkey-lock" type="checkbox">
+            <span><strong>Lock it with a passkey</strong><br>
+            <span class="hint inline">Your fingerprint, face or device PIN is needed to sign back in. Checked on this device only;
+              the server never sees it.</span></span>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset id="fs-openrouter" class="field-group">
+        <legend>Your OpenRouter key</legend>
+        <label for="f-key">API key</label>
+        <input id="f-key" name="openrouter" type="password" spellcheck="false" autocapitalize="none"
+               autocomplete="off" placeholder="sk-or-v1-…" required>
+        <p class="hint">
+          Get one at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a>.
+          It stays in this browser tab (<code>sessionStorage</code>) and is sent straight to OpenRouter —
+          this site's server never sees it and never pays for your tokens. Closing the tab forgets it.
+        </p>
+      </fieldset>
+
+      <p id="login-error" class="error-line" role="alert" hidden></p>
+
+      <button id="login-submit" type="submit" class="btn btn-primary btn-block">Log in</button>
+      <button id="login-cancel" type="button" class="btn btn-ghost btn-block login-cancel" hidden>Cancel — back to the chat</button>
+    </form>
+
+    <footer id="login-footer" class="login-footer">
+      <p>Sessions are held in the server's memory only and expire after 30 minutes idle (12 hours maximum).
+         The conversation itself lives in this tab and is gone when you close it.</p>
+      <!--home-link-->
+    </footer>
+  </section>
+</main>
+
+<!-- ------------------------------------------------------ two-factor view -->
+<main id="view-twofactor" class="view login-view" hidden>
+  <section class="panel login-panel tfa-panel">
+    <header class="login-header">
+      <div class="login-icon" aria-hidden="true">🔐</div>
+      <h1>Two-factor verification</h1>
+      <p id="tfa-text" class="tagline"></p>
+    </header>
+
+    <form id="tfa-form" autocomplete="on" novalidate>
+      <label class="sr-only" for="f-tfa-code">Verification code</label>
+      <input id="f-tfa-code" name="otp" class="code-input" type="text"
+             inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*"
+             maxlength="9" spellcheck="false" autocapitalize="none" autocorrect="off"
+             placeholder="000000" aria-describedby="tfa-text tfa-expiry" autofocus required>
+
+      <p id="tfa-expiry" class="hint tfa-expiry" aria-live="polite"></p>
+      <p id="tfa-attempts" class="hint tfa-attempts" role="status" hidden></p>
+      <p id="tfa-error" class="error-line" role="alert" hidden></p>
+
+      <button id="tfa-submit" type="submit" class="btn btn-primary btn-block">Verify</button>
+      <button id="tfa-back" type="button" class="btn btn-ghost btn-block tfa-back">Back to login</button>
+    </form>
+
+    <footer class="login-footer">
+      <p>Your SmarterMail password has already been discarded — only this code finishes the sign-in.</p>
+    </footer>
+  </section>
+</main>
+
+<!-- ------------------------------------------------------------- chat view -->
+<div id="view-chat" class="view chat-view" hidden>
+  <header class="chat-header">
+    <div class="identity">
+      <span class="identity-icon" aria-hidden="true">✉️</span>
+      <ul id="accounts-bar" class="accounts-bar" aria-label="Signed-in accounts"></ul>
+      <button id="btn-add-account" class="btn btn-ghost btn-small add-account" type="button"
+              title="Sign in to another mailbox, a domain admin or a system admin in this same chat">+ Add account</button>
+    </div>
+    <div class="header-actions">
+      <div class="tools-menu">
+        <button id="btn-tools" class="btn btn-ghost" type="button" aria-haspopup="true" aria-expanded="false"
+                aria-controls="tools-popover" title="Choose which tool groups are sent to the model">Tools</button>
+        <div id="tools-popover" class="popover tools-popover" role="dialog" aria-label="Tool groups" hidden>
+          <p class="popover-title">Tool groups sent to the model</p>
+          <div id="tools-groups" class="tools-groups"></div>
+          <p id="tools-count" class="hint tools-count"></p>
+        </div>
+      </div>
+      <div class="tools-menu">
+        <button id="btn-mcp" class="btn btn-ghost" type="button" aria-haspopup="true" aria-expanded="false"
+                aria-controls="mcp-popover" title="Use these accounts from Cursor, Claude Code or another MCP client">MCP</button>
+        <div id="mcp-popover" class="popover mcp-popover" role="dialog" aria-label="MCP access" hidden>
+          <p class="popover-title">Use these accounts from an MCP client</p>
+          <p class="hint">Endpoint: <code id="mcp-url"></code></p>
+          <p id="mcp-status" class="hint mcp-status" role="status"></p>
+          <div id="mcp-reveal" class="mcp-reveal" hidden>
+            <label class="hint" for="mcp-config">Shown once — copy it now. Cursor <code>mcp.json</code>:</label>
+            <textarea id="mcp-config" class="mcp-config" rows="9" wrap="off" readonly spellcheck="false"></textarea>
+          </div>
+          <p id="mcp-error" class="error-line" role="alert" hidden></p>
+          <div class="mcp-actions">
+            <button id="mcp-generate" class="btn btn-primary btn-small" type="button">Generate token</button>
+            <button id="mcp-copy" class="btn btn-ghost btn-small" type="button" hidden>Copy</button>
+            <button id="mcp-revoke" class="btn btn-ghost btn-small" type="button" hidden>Revoke</button>
+          </div>
+          <p class="hint">Works on <code>/mcp</code> only, with this chat's accounts and read-only limits. It ends
+             when you log out or the session expires; generating a new one replaces it.</p>
+        </div>
+      </div>
+      <div id="device-menu" class="tools-menu" hidden>
+        <button id="btn-device" class="btn btn-ghost" type="button" aria-haspopup="true" aria-expanded="false"
+                aria-controls="device-popover" title="Whether this device keeps you signed in">This device</button>
+        <div id="device-popover" class="popover device-popover" role="dialog" aria-label="This device" hidden>
+          <p class="popover-title">This device</p>
+          <p id="device-status" class="device-status"></p>
+          <div id="device-actions" class="device-actions"></div>
+        </div>
+      </div>
+      <label class="sr-only" for="model-select">Model</label>
+      <select id="model-select" class="model-select" title="Only models that support tool calling are listed"></select>
+      <button id="btn-new-chat" class="btn btn-ghost" type="button" title="Clear the conversation (it is only in memory)">New chat</button>
+      <button id="btn-logout" class="btn btn-ghost" type="button">Log out</button>
+    </div>
+  </header>
+
+  <main id="messages" class="messages" aria-live="polite" aria-relevant="additions text">
+    <div id="empty-state" class="empty-state">
+      <h2>What would you like to know?</h2>
+      <p id="empty-sub" class="empty-sub">The agent can read your mail, calendar, contacts, tasks and notes through your own server.</p>
+      <div id="empty-chips" class="chips">
+        <button class="chip" type="button">What's unread in my inbox?</button>
+        <button class="chip" type="button">Summarise the last 10 emails I received.</button>
+        <button class="chip" type="button">What's on my calendar this week?</button>
+        <button class="chip" type="button">Find emails from support about the last invoice.</button>
+        <button class="chip" type="button">Which folders have the most unread mail?</button>
+      </div>
+    </div>
+  </main>
+
+  <div id="queue-bar" class="queue-bar" hidden>
+    <span id="queue-bar-text"></span>
+    <button id="queue-clear" class="btn btn-ghost btn-small" type="button">Clear queue</button>
+  </div>
+
+  <form id="composer" class="composer">
+    <textarea id="composer-input" rows="1" placeholder="Ask about your mailbox…"
+              autocomplete="off" spellcheck="true"></textarea>
+    <button id="btn-send" class="btn btn-primary" type="submit" title="Send (Enter)">Send</button>
+    <button id="btn-stop" class="btn btn-stop" type="button" hidden title="Stop the current response">Stop</button>
+  </form>
+  <p class="composer-hint">Enter sends · Shift+Enter for a new line · nothing here is stored anywhere</p>
+</div>
+
+<script type="module" src="./js/chat.js"></script>
+</body>
+</html>

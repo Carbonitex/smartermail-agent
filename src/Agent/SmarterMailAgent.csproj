@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>SmarterMailAgent</RootNamespace>
+    <AssemblyName>SmarterMailAgent</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Core/SmarterMailMcp.Core.csproj" />
+    <ProjectReference Include="../Tools.Mailbox/SmarterMail.Tools.Mailbox.csproj" />
+    <ProjectReference Include="../Tools.DomainAdmin/SmarterMail.Tools.DomainAdmin.csproj" />
+    <ProjectReference Include="../Tools.SysAdmin/SmarterMail.Tools.SysAdmin.csproj" />
+  </ItemGroup>
+
+  <!-- SmarterMailAuth's stub-HttpClient constructor is internal -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="SmarterMailAgent.Tests" />
+  </ItemGroup>
+
+  <!-- wwwroot/dev is the frontend's local stub server; never ship it -->
+  <ItemGroup>
+    <Content Remove="wwwroot/dev/**" />
+    <None Remove="wwwroot/dev/**" />
+  </ItemGroup>
+
+</Project>

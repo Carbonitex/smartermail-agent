@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Mailbox MCP tools, shared by McpClient and Agent -->
+  <PropertyGroup>
+    <RootNamespace>SmarterMailMcp.Server.Tools</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Core/SmarterMailMcp.Core.csproj" />
+  </ItemGroup>
+
+</Project>

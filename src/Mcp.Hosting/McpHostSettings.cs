@@ -1,0 +1,96 @@
+namespace SmarterMailMcp.Hosting;
+
+public enum McpTransport
+{
+    Http,
+    Stdio,
+}
+
+/// <summary>What differs between the MCP servers; everything else lives in <see cref="McpHost"/>.</summary>
+public sealed class McpHostDefinition
+{
+    /// <summary>MCP <c>serverInfo.name</c> and the <c>/health</c> text, e.g. <c>smartermail-mcp-user</c>.</summary>
+    public required string ServerName { get; init; }
+
+    /// <summary>Env var holding the SmarterMail login, e.g. <c>SMARTERMAIL_USER</c>.</summary>
+    public required string UserVariable { get; init; }
+
+    /// <summary>Env var holding the password, e.g. <c>SMARTERMAIL_PASSWORD</c>.</summary>
+    public required string PasswordVariable { get; init; }
+
+    /// <summary>Core's user type: <c>user</c> or <c>admin</c>.</summary>
+    public required string UserType { get; init; }
+
+    /// <summary>Token file used when <c>SMARTERMAIL_TOKEN_FILE</c> is unset.</summary>
+    public required string DefaultTokenFile { get; init; }
+}
+
+/// <summary>
+/// The environment, validated up front so a misconfigured server exits with one clear message instead
+/// of signing in (and possibly tripping SmarterMail's brute-force rules) first.
+/// </summary>
+public sealed record McpHostSettings(
+    McpTransport Transport,
+    string SmarterMailUrl,
+    string Username,
+    string Password,
+    bool ReadOnly,
+    string TokenFile,
+    string? ApiKey)
+{
+    public const string TransportVariable = "MCP_TRANSPORT";
+    public const string StdioArgument = "--stdio";
+    public const string UrlVariable = "SMARTERMAIL_URL";
+    public const string ReadOnlyVariable = "SMARTERMAIL_READ_ONLY";
+    public const string TokenFileVariable = "SMARTERMAIL_TOKEN_FILE";
+    public const string ApiKeyVariable = "API_KEY";
+
+    /// <summary>Parses the settings, or returns every problem found.</summary>
+    public static (McpHostSettings? Settings, IReadOnlyList<string> Errors) Parse(
+        McpHostDefinition definition, IReadOnlyList<string> args, Func<string, string?> env)
+    {
+        var errors = new List<string>();
+
+        var transport = McpTransport.Http;
+        var transportValue = env(TransportVariable)?.Trim().ToLowerInvariant();
+        if (args.Contains(StdioArgument, StringComparer.OrdinalIgnoreCase))
+            transport = McpTransport.Stdio;
+        else if (transportValue is "stdio")
+            transport = McpTransport.Stdio;
+        else if (transportValue is not (null or "" or "http"))
+            errors.Add($"{TransportVariable}='{transportValue}' is not http|stdio.");
+
+        var url = env(UrlVariable);
+        var user = env(definition.UserVariable);
+        var password = env(definition.PasswordVariable);
+        var missing = new[] { (UrlVariable, url), (definition.UserVariable, user), (definition.PasswordVariable, password) }
+            .Where(x => string.IsNullOrWhiteSpace(x.Item2))
+            .Select(x => x.Item1)
+            .ToList();
+        if (missing.Count > 0)
+            errors.Add($"Missing {string.Join(", ", missing)}.");
+
+        // Read-only unless explicitly turned off: a first run should never be able to change anything.
+        var readOnly = true;
+        var readOnlyValue = env(ReadOnlyVariable)?.Trim().ToLowerInvariant();
+        if (readOnlyValue is "false" or "0" or "no")
+            readOnly = false;
+        else if (readOnlyValue is not (null or "" or "true" or "1" or "yes"))
+            errors.Add($"{ReadOnlyVariable}='{readOnlyValue}' is not true|false.");
+
+        var apiKey = env(ApiKeyVariable);
+        if (transport == McpTransport.Http && string.IsNullOrWhiteSpace(apiKey))
+            errors.Add($"{ApiKeyVariable} is required for the HTTP transport (generate one with: openssl rand -hex 32). " +
+                       $"For a local client that launches the server itself, use {StdioArgument} instead.");
+
+        var tokenFile = env(TokenFileVariable);
+        if (string.IsNullOrWhiteSpace(tokenFile))
+            tokenFile = definition.DefaultTokenFile;
+
+        if (errors.Count > 0)
+            return (null, errors);
+
+        return (new McpHostSettings(transport, url!.Trim(), user!.Trim(), password!, readOnly, tokenFile,
+            string.IsNullOrWhiteSpace(apiKey) ? null : apiKey), errors);
+    }
+}

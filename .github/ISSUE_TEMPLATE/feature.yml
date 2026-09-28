@@ -1,0 +1,22 @@
+name: Feature request
+description: A tool, option or improvement you'd like
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part?
+      options:
+        - smartermail-mcp-user
+        - smartermail-mcp-admin
+        - smartermail-agent
+        - Docs / examples
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like to do?
+      description: For a new tool, the SmarterMail API endpoint it would use helps a lot.
+    validations:
+      required: true

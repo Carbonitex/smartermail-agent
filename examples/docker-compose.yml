@@ -1,0 +1,68 @@
+# smartermail-agent: all three services. Copy .env.example to .env, fill it in, then start what you
+# need, e.g.  docker compose up -d smartermail-mcp-user
+#
+# Images are multi-arch (linux/amd64, linux/arm64) and run as a non-root user. They have no curl,
+# so health checks use bash's /dev/tcp.
+
+x-mcp-healthcheck: &mcp-healthcheck
+  test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3; head -1 <&3 | grep -q 200"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  # The server signs in to SmarterMail before it listens (retrying while SmarterMail is unreachable),
+  # so /health only answers after a successful sign-in.
+  start_period: 120s
+
+services:
+  # One mailbox (plus its domain's admin tools if the account is a domain admin).
+  # MCP endpoint: http://127.0.0.1:8102/mcp   header: Authorization: Bearer $USER_MCP_API_KEY
+  smartermail-mcp-user:
+    image: ghcr.io/carbonitex/smartermail-mcp-user:1
+    environment:
+      SMARTERMAIL_URL: ${SMARTERMAIL_URL:?set SMARTERMAIL_URL in .env}
+      SMARTERMAIL_USER: ${SMARTERMAIL_USER:?set SMARTERMAIL_USER in .env}
+      SMARTERMAIL_PASSWORD: ${SMARTERMAIL_PASSWORD:?set SMARTERMAIL_PASSWORD in .env}
+      API_KEY: ${USER_MCP_API_KEY:?set USER_MCP_API_KEY in .env}
+      SMARTERMAIL_READ_ONLY: ${USER_MCP_READ_ONLY:-true}        # false = allow sending/changing/deleting
+      SMARTERMAIL_DOMAIN_TOOLS: ${SMARTERMAIL_DOMAIN_TOOLS:-auto}
+    ports:
+      # Localhost only. To reach it from elsewhere, put a TLS reverse proxy in front instead of
+      # publishing it on 0.0.0.0.
+      - "127.0.0.1:8102:8080"
+    # A rejected login exits with code 2 on purpose (retrying could get your IP blocked by
+    # SmarterMail's intrusion detection). on-failure:3 caps the retries; "always" would not.
+    restart: on-failure:3
+    healthcheck: *mcp-healthcheck
+
+  # One system-admin account. Read-only by default; treat its API key like the admin password.
+  # MCP endpoint: http://127.0.0.1:8103/mcp   header: Authorization: Bearer $ADMIN_MCP_API_KEY
+  smartermail-mcp-admin:
+    image: ghcr.io/carbonitex/smartermail-mcp-admin:1
+    environment:
+      SMARTERMAIL_URL: ${SMARTERMAIL_URL:?set SMARTERMAIL_URL in .env}
+      SMARTERMAIL_ADMIN_USER: ${SMARTERMAIL_ADMIN_USER:?set SMARTERMAIL_ADMIN_USER in .env}
+      SMARTERMAIL_ADMIN_PASSWORD: ${SMARTERMAIL_ADMIN_PASSWORD:?set SMARTERMAIL_ADMIN_PASSWORD in .env}
+      API_KEY: ${ADMIN_MCP_API_KEY:?set ADMIN_MCP_API_KEY in .env}
+      SMARTERMAIL_READ_ONLY: ${ADMIN_MCP_READ_ONLY:-true}       # false = all 58 tools, including deletes
+    ports:
+      - "127.0.0.1:8103:8080"
+    restart: on-failure:3
+    healthcheck: *mcp-healthcheck
+
+  # The browser chat. Users bring their own SmarterMail logins and OpenRouter key; it has no
+  # SmarterMail credentials of its own. Serve it over HTTPS (the session cookie is Secure).
+  smartermail-agent:
+    image: ghcr.io/carbonitex/smartermail-agent:1
+    environment:
+      RESUME_KEY: ${RESUME_KEY:-}                 # enables "Remember me on this device"; keep it stable
+      PATH_BASE: ${AGENT_PATH_BASE:-/}            # e.g. /mail-agent when served under a path
+      TRUSTED_PROXIES: ${AGENT_TRUSTED_PROXIES:-} # your reverse proxy's IP/CIDR (see docs/agent.md)
+    ports:
+      - "127.0.0.1:8107:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3; head -1 <&3 | grep -q 200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

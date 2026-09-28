@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- System-admin MCP tools, shared by McpAdmin and Agent. LogAnalysisTools stays in McpAdmin. -->
+  <PropertyGroup>
+    <RootNamespace>SmarterMailMcp.SystemAdmin.Tools</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Core/SmarterMailMcp.Core.csproj" />
+  </ItemGroup>
+
+</Project>

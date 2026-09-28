@@ -1,0 +1,52 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please don't include passwords, API keys, tokens, server addresses or real mail content.
+        Security problems: use **Security → Report a vulnerability** instead of an issue.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part?
+      options:
+        - smartermail-mcp-user
+        - smartermail-mcp-admin
+        - smartermail-agent (self-hosted)
+        - smartermail-agent (hosted instance)
+        - Docs / examples
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or image tag
+      placeholder: "1.0.0, or ghcr.io/carbonitex/smartermail-mcp-user:1"
+    validations:
+      required: true
+  - type: input
+    id: smartermail
+    attributes:
+      label: SmarterMail build
+      description: Shown at the bottom of SmarterMail's login page or in Settings → About.
+      placeholder: "Build 9xxx (2026-xx-xx)"
+  - type: input
+    id: client
+    attributes:
+      label: MCP client and transport
+      placeholder: "Claude Desktop, stdio via docker"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: For a tool problem, include the tool name and its arguments (redacted).
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The server's stderr / container logs around the problem. Redact addresses and names.
+      render: text

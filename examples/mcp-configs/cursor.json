@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "smartermail": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "SMARTERMAIL_URL",
+        "-e", "SMARTERMAIL_USER",
+        "-e", "SMARTERMAIL_PASSWORD",
+        "ghcr.io/carbonitex/smartermail-mcp-user:1", "--stdio"
+      ],
+      "env": {
+        "SMARTERMAIL_URL": "https://mail.example.com",
+        "SMARTERMAIL_USER": "you@example.com",
+        "SMARTERMAIL_PASSWORD": "your-password"
+      }
+    },
+    "smartermail-admin-http": {
+      "url": "http://localhost:8103/mcp",
+      "headers": { "Authorization": "Bearer your-admin-api-key" }
+    }
+  }
+}

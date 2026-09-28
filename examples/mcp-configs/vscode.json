@@ -1,0 +1,29 @@
+{
+  "inputs": [
+    { "type": "promptString", "id": "sm-password", "description": "SmarterMail password", "password": true },
+    { "type": "promptString", "id": "sm-admin-api-key", "description": "smartermail-mcp-admin API key", "password": true }
+  ],
+  "servers": {
+    "smartermail": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "SMARTERMAIL_URL",
+        "-e", "SMARTERMAIL_USER",
+        "-e", "SMARTERMAIL_PASSWORD",
+        "ghcr.io/carbonitex/smartermail-mcp-user:1", "--stdio"
+      ],
+      "env": {
+        "SMARTERMAIL_URL": "https://mail.example.com",
+        "SMARTERMAIL_USER": "you@example.com",
+        "SMARTERMAIL_PASSWORD": "${input:sm-password}"
+      }
+    },
+    "smartermail-admin": {
+      "type": "http",
+      "url": "http://localhost:8103/mcp",
+      "headers": { "Authorization": "Bearer ${input:sm-admin-api-key}" }
+    }
+  }
+}

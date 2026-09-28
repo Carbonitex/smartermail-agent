@@ -1,0 +1,8 @@
+bin/
+obj/
+.DS_Store
+.vs/
+.idea/
+*.user
+.claude/worktrees/
+CLAUDE.local.md

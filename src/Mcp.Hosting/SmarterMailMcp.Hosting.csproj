@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Shared host for the fixed-account MCP servers (src/McpUser, src/McpAdmin): configuration,
+       startup sign-in, stdio or HTTP transport, API-key auth, read-only tool filtering, /health. -->
+  <PropertyGroup>
+    <RootNamespace>SmarterMailMcp.Hosting</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Core/SmarterMailMcp.Core.csproj" />
+  </ItemGroup>
+
+</Project>
