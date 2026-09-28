@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `examples/`: `docker compose up <one service>` no longer fails because another service's settings
+  are empty, and `.env.example` quotes passwords so a `$` in one survives Compose's interpolation.
+
 ## [1.0.0]
 
 First public release.

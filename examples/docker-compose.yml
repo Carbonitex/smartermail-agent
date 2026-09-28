@@ -19,10 +19,10 @@ services:
   smartermail-mcp-user:
     image: ghcr.io/carbonitex/smartermail-mcp-user:1
     environment:
-      SMARTERMAIL_URL: ${SMARTERMAIL_URL:?set SMARTERMAIL_URL in .env}
-      SMARTERMAIL_USER: ${SMARTERMAIL_USER:?set SMARTERMAIL_USER in .env}
-      SMARTERMAIL_PASSWORD: ${SMARTERMAIL_PASSWORD:?set SMARTERMAIL_PASSWORD in .env}
-      API_KEY: ${USER_MCP_API_KEY:?set USER_MCP_API_KEY in .env}
+      SMARTERMAIL_URL: ${SMARTERMAIL_URL:-}
+      SMARTERMAIL_USER: ${SMARTERMAIL_USER:-}
+      SMARTERMAIL_PASSWORD: ${SMARTERMAIL_PASSWORD:-}
+      API_KEY: ${USER_MCP_API_KEY:-}
       SMARTERMAIL_READ_ONLY: ${USER_MCP_READ_ONLY:-true}        # false = allow sending/changing/deleting
       SMARTERMAIL_DOMAIN_TOOLS: ${SMARTERMAIL_DOMAIN_TOOLS:-auto}
     ports:
@@ -39,10 +39,10 @@ services:
   smartermail-mcp-admin:
     image: ghcr.io/carbonitex/smartermail-mcp-admin:1
     environment:
-      SMARTERMAIL_URL: ${SMARTERMAIL_URL:?set SMARTERMAIL_URL in .env}
-      SMARTERMAIL_ADMIN_USER: ${SMARTERMAIL_ADMIN_USER:?set SMARTERMAIL_ADMIN_USER in .env}
-      SMARTERMAIL_ADMIN_PASSWORD: ${SMARTERMAIL_ADMIN_PASSWORD:?set SMARTERMAIL_ADMIN_PASSWORD in .env}
-      API_KEY: ${ADMIN_MCP_API_KEY:?set ADMIN_MCP_API_KEY in .env}
+      SMARTERMAIL_URL: ${SMARTERMAIL_URL:-}
+      SMARTERMAIL_ADMIN_USER: ${SMARTERMAIL_ADMIN_USER:-}
+      SMARTERMAIL_ADMIN_PASSWORD: ${SMARTERMAIL_ADMIN_PASSWORD:-}
+      API_KEY: ${ADMIN_MCP_API_KEY:-}
       SMARTERMAIL_READ_ONLY: ${ADMIN_MCP_READ_ONLY:-true}       # false = all 58 tools, including deletes
     ports:
       - "127.0.0.1:8103:8080"
