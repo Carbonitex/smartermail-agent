@@ -32,7 +32,7 @@ jobs:
             dockerfile: src/Agent/Dockerfile
             description: Browser chat for SmarterMail with your own AI key
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # GHCR image names must be lower case; the owner is the single place to change for a move.
       - name: Image name
@@ -94,7 +94,7 @@ jobs:
     needs: images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Release notes are the tag's section of CHANGELOG.md ("## [X.Y.Z]" up to the next "## [").
       - name: Release notes
