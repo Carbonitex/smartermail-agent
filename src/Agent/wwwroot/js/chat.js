@@ -4,11 +4,19 @@
  * picker, tool-group filter, MCP token menu.
  *
  * State lives in this module only. Nothing about the conversation is written to
- * storage of any kind; a reload starts a fresh conversation.
+ * storage of any kind; a reload starts a fresh conversation. In server mode a
+ * profile (profile.js, profile-ui.js) keeps the accounts and settings on the
+ * server, passkey-encrypted, and tasks.js runs prompts there on a schedule.
  */
 
 import * as api from './api.js';
 import * as resume from './resume.js';
+import * as profile from './profile.js';
+import {
+  initProfileUi, usesProfiles, renderLoginPanel, renderOffer, renderMenu as renderProfileMenu,
+  closePopover as closeProfilePopover
+} from './profile-ui.js';
+import { initTasks, renderTasksButton, refreshBadge as refreshTasksBadge } from './tasks.js';
 import { storage, DEFAULT_MODEL } from './storage.js';
 import { renderMarkdown, escapeHtml, prettyJson } from './markdown.js';
 import {
@@ -154,6 +162,9 @@ async function init() {
   el.key.value = storage.openRouterKey;
   state.disabled = storage.disabledCategories;
 
+  await profile.loadConfig();
+  await initProfileUi(profileHooks);
+  initTasks(taskHooks);
   await loadResumeConfig();
 
   // A cookie may still be valid (reload / back button).
@@ -182,7 +193,10 @@ async function init() {
  */
 async function enterSession(s, keyMessage) {
   const first = sessionAccounts(s)[0];
-  if (!first) return false;
+  // A profile session may be empty (every stored account needs a fresh sign-in), but a
+  // locked one is not usable until its passkey has been used again.
+  if (s && s.profile && !s.profile.unlocked) return false;
+  if (!first && !(s && s.profile)) return false;
   if (storage.openRouterKey) {
     await enterChat(s);
     return true;
@@ -191,11 +205,88 @@ async function enterSession(s, keyMessage) {
   state.resumable = true;
   el.rememberedPanel.hidden = true;
   el.rememberOptions.hidden = true;   // the session exists; its remember setting is already decided
-  el.hostname.value = hostOf(first.baseUrl);
-  el.email.value = first.emailAddress || first.username || '';
+  renderLoginPanel({ resumable: true });
+  if (first) {
+    el.hostname.value = hostOf(first.baseUrl);
+    el.email.value = first.emailAddress || first.username || '';
+  }
   el.key.focus();
   return true;
 }
+
+/* ------------------------------------------------------ server profiles */
+
+/** What a profile keeps for the chat. */
+function currentSettings() {
+  return {
+    openRouterKey: storage.openRouterKey,
+    model: el.modelSelect.value || storage.model || DEFAULT_MODEL,
+    toolsOff: [...state.disabled]
+  };
+}
+
+/** Saves the settings to the profile when this is a profile chat and the page holds its keys. */
+function syncProfileSettings() {
+  if (!state.session || !state.session.profile || !profile.hasKeys()) return;
+  profile.saveSettings(currentSettings())
+    .catch((err) => addNotice(`Could not save your settings to the profile: ${err.message}`, 'warn'));
+}
+
+const profileHooks = {
+  getSession: () => state.session,
+  currentSettings,
+  setLoginError: (msg) => setLoginError(msg),
+  notice: (text, kind) => {
+    if (state.session && !el.chatView.hidden) addNotice(text, kind);
+    else state.notices.push([text, kind]);
+  },
+  closeOtherPopovers: () => { closeToolsPopover(); closeMcpPopover(); closeDevicePopover(); },
+
+  /** A passkey or recovery-code sign-in: settings back from the profile, then into the chat. */
+  async onSignedIn({ session, skipped, settings }) {
+    if (settings) {
+      if (settings.openRouterKey) { storage.openRouterKey = settings.openRouterKey; el.key.value = settings.openRouterKey; }
+      if (settings.model) storage.model = settings.model;
+      if (Array.isArray(settings.toolsOff)) { state.disabled = new Set(settings.toolsOff); storage.disabledCategories = state.disabled; }
+    }
+    forgetDevice();   // a profile chat is remembered by the profile, not by this browser
+    const notices = skippedNotices(skipped);
+    if (!sessionAccounts(session).length) {
+      notices.push(['None of your saved accounts could be signed in. Add them again with "+ Add account"; they stay in your profile.', 'warn']);
+    }
+
+    if (state.session && !el.chatView.hidden) {
+      await applySession(session);
+      for (const [text, kind] of notices) addNotice(text, kind);
+      addNotice('Profile unlocked on this page.', 'info');
+      return;
+    }
+    state.notices.push(...notices);
+    if (!await enterSession(session, 'Profile opened — paste your OpenRouter key to continue. It will be saved to your profile.')) showLogin();
+  },
+
+  /** The chat moved onto a new profile session (just created). */
+  async onSession(session) {
+    forgetDevice();
+    await applySession(session);
+  },
+
+  /** The profile is gone (deleted): back to an empty login. */
+  onEnded(message) {
+    storage.clear();
+    state.disabled = new Set();
+    el.key.value = '';
+    showLogin(message);
+  }
+};
+
+const taskHooks = {
+  getSession: () => state.session,
+  getToolList: () => state.toolList,
+  currentModel: () => el.modelSelect.value || storage.model || DEFAULT_MODEL,
+  notice: (text, kind) => addNotice(text, kind),
+  unlock: async () => profileHooks.onSignedIn(await profile.signInWithPasskey())
+};
 
 /* ------------------------------------------------------------ login view */
 
@@ -232,12 +323,15 @@ function setLoginMode(add) {
   el.loginTitle.textContent = add ? 'Add an account' : 'SmarterMail Agent';
   el.loginTagline.textContent = add
     ? 'Sign in to another mailbox, a domain admin, or a system admin. It joins this chat; the conversation is kept.'
-    : 'Chat with your own mailbox. Your server, your key, nothing stored.';
+    : usesProfiles()
+      ? 'Chat with your own mailbox. Your server, your key.'
+      : 'Chat with your own mailbox. Your server, your key, nothing stored.';
   el.loginLegend.textContent = add ? 'The account to add' : 'Your SmarterMail';
   el.loginSubmit.textContent = add ? 'Add account' : 'Log in';
   // An added account joins the session's own remember setting.
   el.rememberOptions.hidden = add || !state.resumeEnabled;
   if (add) el.rememberedPanel.hidden = true;
+  renderLoginPanel({ adding: add, resumable: state.resumable });
 }
 
 /** Open the login form in add mode, over the live chat. */
@@ -369,6 +463,7 @@ async function resumeWithKey(key) {
     if (!sessionAccounts(s).length) return showLogin();
     storage.openRouterKey = key;
     await enterChat(s);
+    syncProfileSettings();   // a profile chat keeps the key for the next browser
   } catch (err) {
     if (err instanceof api.ApiError && err.status === 401) return showLogin('Your session has expired. Please sign in again.');
     setLoginError(loginMessage(err));
@@ -576,6 +671,7 @@ async function enterChat(session) {
   closeMcpPopover();
   renderMcpMenu();
   renderDeviceMenu();
+  renderServerUi();
   el.loginView.hidden = true;
   el.tfaView.hidden = true;
   el.chatView.hidden = false;
@@ -585,6 +681,17 @@ async function enterChat(session) {
 
   await loadTools();
   loadModels();
+}
+
+/** Profile offer, Profile menu and Tasks button follow the session. */
+function renderServerUi() {
+  $('composer-hint').textContent = state.session && state.session.profile
+    ? 'Enter sends · Shift+Enter for a new line · the conversation is not stored; your profile keeps accounts and settings'
+    : 'Enter sends · Shift+Enter for a new line · nothing here is stored anywhere';
+  renderOffer();
+  renderProfileMenu();
+  renderTasksButton();
+  refreshTasksBadge();
 }
 
 /** The system prompt for the current accounts and Tools-menu selection. */
@@ -611,6 +718,8 @@ async function applySession(next, { added = false, removed = null } = {}) {
   state.session = next;
   renderAccounts();
   renderMcpMenu();
+  renderDeviceMenu();
+  renderServerUi();
 
   const gained = after.filter((a) => !before.some((b) => b.id === a.id));
   const lost = before.filter((b) => !after.some((a) => a.id === b.id));
@@ -714,13 +823,16 @@ function renderAccounts() {
     badge.title = a.readOnly ? 'This account only has read-only tools' : 'This account can make changes';
     li.appendChild(badge);
 
-    // The last account goes with "Log out"; an × on it would do the same thing.
-    if (many) {
+    // The last account goes with "Log out"; an × on it would do the same thing. In a profile
+    // chat it would not (the profile and its other settings stay), so it is offered there too.
+    if (many || (state.session && state.session.profile)) {
       const x = document.createElement('button');
       x.type = 'button';
       x.className = 'acct-remove';
       x.textContent = '×';
-      x.title = `Remove ${accountTitle(a)} from this chat`;
+      x.title = state.session && state.session.profile
+        ? `Remove ${accountTitle(a)} from this chat and from your profile`
+        : `Remove ${accountTitle(a)} from this chat`;
       x.setAttribute('aria-label', `Remove ${accountTitle(a)}`);
       x.disabled = state.busy;
       x.addEventListener('click', () => removeAccount(a));
@@ -753,7 +865,7 @@ async function removeAccount(account) {
       return;
     }
   }
-  if (accounts.length <= 1) {
+  if (accounts.length <= 1 && !state.session.profile) {
     // The server revoked it; the saved sign-in only held that account.
     forgetDevice();
     showLogin('That was the last account, so the session has ended.');
@@ -783,6 +895,7 @@ async function syncSession() {
   if (next && ids(next) !== ids(state.session)) await applySession(next);
   else if (next) { state.session = next; renderMcpMenu(); }
   renderDeviceMenu();
+  refreshTasksBadge();
 }
 
 /* ------------------------------------------- remember me on this device */
@@ -804,6 +917,8 @@ async function loadResumeConfig() {
   } catch {
     state.resumeEnabled = false;   // an older server, or it is unreachable: no option
   }
+  // A server that keeps profiles offers those instead of a sign-in held by this browser.
+  if (usesProfiles()) state.resumeEnabled = false;
   state.prf = state.resumeEnabled && await resume.prfSupported();
   el.lockOption.hidden = !state.prf || !el.remember.checked;
   if (state.resumeDays) {
@@ -957,7 +1072,8 @@ function skippedNotices(skipped) {
     EXPIRED: 'its saved sign-in had expired',
     UNAVAILABLE: 'its mail server did not answer',
     BLOCKED_HOST: 'its server address is no longer allowed',
-    ACCOUNT_LIMIT: 'this chat is full'
+    ACCOUNT_LIMIT: 'this chat is full',
+    THROTTLED: 'too many failed sign-ins to its server just now; try again later'
   };
   return (skipped || []).map((s) => [
     `Not signed back in: ${s.login} on ${hostOf(s.baseUrl)} — ${why[s.reason] || 'it could not be restored'}. Add it again with "+ Add account".`,
@@ -1025,7 +1141,7 @@ function renderRememberedPanel() {
 }
 
 function renderDeviceMenu() {
-  el.deviceMenu.hidden = !state.resumeEnabled || !state.session;
+  el.deviceMenu.hidden = !state.resumeEnabled || !state.session || !!state.session.profile;
   renderDevicePopover();
 }
 
@@ -1153,6 +1269,7 @@ function renderToolsMenu() {
         storage.disabledCategories = state.disabled;
         applyToolFilter();
         refreshSystemPrompt();
+        syncProfileSettings();
       });
       const name = document.createElement('span');
       name.textContent = c.name;
@@ -1354,7 +1471,7 @@ function setModelOptions(models, selected) {
 }
 
 function wireChat() {
-  el.modelSelect.addEventListener('change', () => { storage.model = el.modelSelect.value; });
+  el.modelSelect.addEventListener('change', () => { storage.model = el.modelSelect.value; syncProfileSettings(); });
 
   el.btnNewChat.addEventListener('click', () => {
     if (state.busy) stopTurn();
@@ -1368,26 +1485,31 @@ function wireChat() {
   el.btnLogout.addEventListener('click', async () => {
     if (state.busy) stopTurn();
     closeMcpPopover();
+    closeProfilePopover();
+    const wasProfile = !!(state.session && state.session.profile);
     try { await api.logout(); } catch { /* best effort */ }
     storage.clear();
     forgetDevice();   // the server revoked the tokens; the saved copy is dead anyway
+    profile.lock();
     state.disabled = new Set();
     el.password.value = '';
     el.key.value = '';
-    showLogin('Logged out. The session was destroyed on the server.');
+    showLogin(wasProfile
+      ? 'Logged out. Your profile stays on this server: sign in with your passkey to come back.'
+      : 'Logged out. The session was destroyed on the server.');
   });
 
   el.btnAddAccount.addEventListener('click', () => showAddAccount());
   el.loginCancel.addEventListener('click', () => returnToChat());
 
-  el.btnTools.addEventListener('click', (e) => { e.stopPropagation(); closeMcpPopover(); closeDevicePopover(); toggleToolsPopover(); });
+  el.btnTools.addEventListener('click', (e) => { e.stopPropagation(); closeMcpPopover(); closeDevicePopover(); closeProfilePopover(); toggleToolsPopover(); });
   el.toolsPopover.addEventListener('click', (e) => e.stopPropagation());
-  el.btnMcp.addEventListener('click', (e) => { e.stopPropagation(); closeToolsPopover(); closeDevicePopover(); toggleMcpPopover(); });
+  el.btnMcp.addEventListener('click', (e) => { e.stopPropagation(); closeToolsPopover(); closeDevicePopover(); closeProfilePopover(); toggleMcpPopover(); });
   el.mcpPopover.addEventListener('click', (e) => e.stopPropagation());
   el.mcpGenerate.addEventListener('click', generateMcpToken);
   el.mcpRevoke.addEventListener('click', revokeMcpToken);
   el.mcpCopy.addEventListener('click', copyMcpConfig);
-  document.addEventListener('click', () => { closeToolsPopover(); closeMcpPopover(); closeDevicePopover(); });
+  document.addEventListener('click', () => { closeToolsPopover(); closeMcpPopover(); closeDevicePopover(); closeProfilePopover(); });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !el.toolsPopover.hidden) { closeToolsPopover(); el.btnTools.focus(); }
     if (e.key === 'Escape' && !el.mcpPopover.hidden) { closeMcpPopover(); el.btnMcp.focus(); }

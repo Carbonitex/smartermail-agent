@@ -33,6 +33,8 @@ across the three scopes and canned data, so the UI can be exercised without the
 | `POST /api/dev/restart` | Dev only: drops every session, as a restart of the real server does. Use it to exercise resume. |
 | `GET /api/tools` | `[{ name, description, inputSchema, category, scope, write }]` for the tools at least one account may run. With more than one account each schema gets an injected `account` enum of the eligible handles, `required` when more than one is eligible. |
 | `POST /api/tools/call` | `200 {isError, content, account}`; `arguments.account` picks the account (optional when only one qualifies). Missing/unknown/wrong-role `account` → `200 isError` listing the valid handles. A write on a read-only account → `403` naming it. Unknown tool → `404`. Add `?delay=2000` to slow a tool down. |
+| `GET /api/config` | `{ mode, resume, profiles, tasks }`; `MODE=browser` for browser-only, `TASKS=false` hides tasks. |
+| `/api/profile/*`, `/api/tasks/*` | Server mode, in `stub-profiles.mjs`. WebAuthn is not verified (any credential is accepted by id), but the browser's crypto is real and fake task runs are sealed to the profile's public key exactly as the server seals them. |
 | `GET /health` | `smartermail-agent ok (stub)` |
 
 Environment: `PORT` (default `8787`, `0` picks a free port and logs it),
@@ -181,3 +183,15 @@ node --test 'wwwroot/dev/test/*.test.mjs'
 
 No dependencies, no build step, no `package.json`: Node's ESM syntax detection
 loads `js/*.js` directly.
+
+## Profiles and tasks without a passkey
+
+```sh
+SEED_PROFILE=1 node wwwroot/dev/stub-server.mjs
+```
+
+prints a recovery code for a seeded profile (two accounts, one delegated, a task key, one task with
+a result). On the login view choose **Use a recovery code** and paste it: you land in a profile
+session with the Profile menu and the Tasks dialog working, and the result opens with the real
+browser crypto. A real passkey works against the stub too (it just is not verified).
+

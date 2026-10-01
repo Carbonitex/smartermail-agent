@@ -22,8 +22,27 @@ major tag (e.g. `:1`) picks up fixes automatically.
 | Component | Credentials it holds | Where |
 |---|---|---|
 | `smartermail-mcp-user` / `-admin` | One SmarterMail login (from the environment) and its access/refresh tokens | Memory and a token file (`SMARTERMAIL_TOKEN_FILE`, default under `/tmp` in the container) |
-| Agent | Tokens for whoever signs in | Memory only; nothing is written to disk. "Remember me" keeps an encrypted bundle **in the user's browser**, sealed with `RESUME_KEY` |
-| Agent (browser) | The user's OpenRouter key | The browser's `sessionStorage`; it is sent to OpenRouter only, never to the agent's server |
+| Agent, browser-only mode | Tokens for whoever signs in | Memory only; nothing is written to disk. "Remember me" keeps an encrypted bundle **in the user's browser**, sealed with `RESUME_KEY` |
+| Agent, server mode (default) | The same in memory, plus the refresh tokens of accounts users save to a **profile** | SQLite under `DATA_DIR`, encrypted (below) |
+| Agent (browser) | The user's OpenRouter key | The browser's `sessionStorage`; sent to OpenRouter only. In a profile it is also stored encrypted with a key only the user's passkey yields |
+
+**Server-mode profiles** are encrypted under a key the server never sees: a random profile key,
+wrapped with each passkey's WebAuthn PRF output (and optionally a recovery code). From it the browser
+derives a settings key (never sent), an accounts key (sent at unlock, held in memory while the profile
+is unlocked: the server needs the tokens anyway to relay calls) and a key for the private half of a
+P-256 key pair, to which the server seals each scheduled run's transcript. Accounts the user lets
+**scheduled tasks** use are sealed with the server's `DATA_KEY` instead, as are task definitions and
+the tasks' OpenRouter key: the server must read them while nobody is signed in.
+
+| Someone who has | Can read |
+|---|---|
+| The database file only | Nothing but ids, timestamps, passkey public keys and task schedules |
+| The database and `DATA_KEY` | Delegated accounts' refresh tokens, task definitions, the tasks' OpenRouter key. Not other accounts, settings or run transcripts |
+| The running server | What it is using, as for any relay |
+
+So **the operator of a server-mode instance can act as any account a user delegated to scheduled
+tasks.** Keep `DATA_KEY` out of backups of the volume. A deployment that serves strangers should run
+`BROWSER_ONLY_MODE=true`.
 
 **Defaults that limit damage**
 
@@ -60,4 +79,6 @@ major tag (e.g. `:1`) picks up fixes automatically.
   writes, and use a client that asks before running tools.
 - Tool results, including mail contents, go to whichever model provider your MCP client or agent uses.
 - Prompt injection: an email can contain text meant to steer the model. Read-only mode is the main
-  defence against it.
+  defence against it. Scheduled tasks run unattended, so they may only make the changes the user ticked
+  for that task (enforced by the server, not just the prompt), at most N per run, and a test run
+  simulates them first.

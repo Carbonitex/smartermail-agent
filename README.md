@@ -12,8 +12,10 @@ This repo contains three things:
   the domain-admin tools automatically when that account is a domain admin.
 - **smartermail-mcp-admin**: an MCP server for one system-admin account.
 - **smartermail-agent**: a browser chat. Sign in to one or more SmarterMail accounts, paste your own
-  [OpenRouter](https://openrouter.ai/keys) key, and chat. A hosted instance run by the author is at
-  **https://carbonitex.dev/mail-agent/**.
+  [OpenRouter](https://openrouter.ai/keys) key, and chat. Self-hosted, it can also keep a
+  passkey-encrypted **profile** per user (sign in from any browser) and run **scheduled tasks**. A
+  hosted instance run by the author is at **https://carbonitex.dev/mail-agent/** (browser-only:
+  it stores nothing).
 
 All three use the same tools: 59 for a mailbox, 107 for a domain admin and 58 for a system admin
 ([full list](docs/tools.md)).
@@ -85,14 +87,17 @@ Put a TLS reverse proxy in front of it before exposing it to anything else.
 
 ```bash
 docker run -d --name smartermail-agent -p 8107:8080 \
-  -e RESUME_KEY="$(openssl rand -base64 32)" \
+  -v smartermail-agent-data:/data \
+  -e DATA_KEY="$(openssl rand -base64 32)" \
   ghcr.io/carbonitex/smartermail-agent:1
 # open http://localhost:8107/
 ```
 
-For production, put it behind a TLS reverse proxy and set `TRUSTED_PROXIES`. That page also covers
-hosting it under a path such as `/mail-agent/`: see [docs/agent.md](docs/agent.md).
-`RESUME_KEY` turns on "Remember me on this device". Keep it stable across restarts.
+The volume holds users' passkey-encrypted profiles and scheduled tasks; `DATA_KEY` turns tasks on.
+Generate it once and keep it (a new key breaks every task). Set `BROWSER_ONLY_MODE=true` instead to
+store nothing on the server, as the hosted instance does. For production, put it behind a TLS
+reverse proxy and set `PUBLIC_ORIGIN` and `TRUSTED_PROXIES`: see [docs/agent.md](docs/agent.md),
+which also covers hosting it under a path such as `/mail-agent/`.
 
 ## Safety defaults
 

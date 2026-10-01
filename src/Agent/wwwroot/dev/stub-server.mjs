@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { handle as handleProfiles, config as serverConfig, profileState, seed as seedProfile, MODE } from './stub-profiles.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');               // wwwroot/
@@ -286,7 +287,8 @@ const publicSession = (s) => ({
   remembered: !!s.remembered,
   accounts: s.accounts.map(({ id, handle, role, username, emailAddress, domain, baseUrl, readOnly }) =>
     ({ id, handle, role, username, emailAddress, domain, baseUrl, readOnly })),
-  mcpToken: s.mcpToken ? { active: true, expiresAt: s.mcpToken.expiresAt } : { active: false, expiresAt: null }
+  mcpToken: s.mcpToken ? { active: true, expiresAt: s.mcpToken.expiresAt } : { active: false, expiresAt: null },
+  profile: profileState(s)
 });
 
 /* ------------------------------------------- remember me on this device */
@@ -605,6 +607,16 @@ async function handleApi(req, res, p, url) {
     return fakeCompletions(res, await readBody(req), sessionOf(req) || { accounts: [] });
   }
 
+  /* ---- server mode (stub-profiles.mjs) ---- */
+
+  if (p === '/config' && method === 'GET') return json(res, 200, serverConfig(RESUME_ENABLED, RESUME_DAYS));
+
+  if (await handleProfiles({
+    req, res, p, method, readBody, json, sessionOf, sessions, publicSession, sessionCookie, clearCookie,
+    newSessionId: () => crypto.randomBytes(32).toString('base64url'),
+    host: String(req.headers.host || 'localhost').replace(/:\d+$/, '')
+  })) return;
+
   /* ---- remember me on this device ---- */
 
   if (p === '/auth/resume/config' && method === 'GET') {
@@ -685,7 +697,7 @@ async function handleApi(req, res, p, url) {
     if (!s.accounts.some((a) => a.id === id)) return json(res, 404, { error: 'No such account in this session.' });
     s.accounts = s.accounts.filter((a) => a.id !== id);
     if (s.remembered) bumpVersion(s);
-    if (!s.accounts.length) {
+    if (!s.accounts.length && !s.profileId) {
       sessions.delete(s.id);                       // the last account ends the session
       if (s.chain) chains.delete(s.chain);
       res.writeHead(204, { 'Set-Cookie': clearCookie });
@@ -827,10 +839,14 @@ function serveStatic(res, p) {
   });
 }
 
+const seededCode = await seedProfile(newAccount);
+
 server.listen(PORT, () => {
   // PORT=0 picks a free port; the tests parse it back off this first line.
   const port = server.address().port;
   console.log(`smartermail-agent stub listening on http://localhost:${port}${BASE}/`);
+  console.log(`  mode        : ${MODE} (MODE=browser for browser-only; SEED_PROFILE=1 seeds a profile)`);
+  if (seededCode) console.log(`  profile     : recovery code ${seededCode}`);
   console.log(`  static root : ${ROOT}`);
   console.log('  login       : any hostname/email; password "bad" → 401; private hostnames → 400');
   console.log('  two-factor  : 2fa*@… → challenge (code 123456); expired*@… → 403 CHANGE_PASSWORD_NEEDED');

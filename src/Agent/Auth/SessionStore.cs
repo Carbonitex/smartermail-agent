@@ -54,12 +54,29 @@ public sealed class SessionStore(ILogger<SessionStore> logger)
         return session;
     }
 
+    /// <summary>
+    /// Opens a session of a server-mode profile. The caller has already counted it on the profile
+    /// (<see cref="Profiles.ProfileRegistry.AcquireSession"/>); the session releases that hold when it ends.
+    /// </summary>
+    public Session CreateForProfile(Profiles.ProfileRuntime profile)
+    {
+        var session = new Session(profile) { Id = NewSessionId() };
+        _sessions[session.Id] = session;
+        logger.LogInformation("Profile session opened. Active sessions: {Count}", _sessions.Count);
+        return session;
+    }
+
+    /// <summary>Every live session of one profile (deleting the profile ends them all).</summary>
+    public IReadOnlyList<Session> SessionsOf(string profileId) =>
+        _sessions.Values.Where(s => s.Profile?.ProfileId == profileId).ToList();
+
     public Session? Get(string? id)
     {
         if (string.IsNullOrEmpty(id) || !_sessions.TryGetValue(id, out var session))
             return null;
 
-        if (session.IsExpired(IdleTimeout, MaxAge) || session.Count == 0)
+        // A profile session may be empty for a while (every stored account needs a fresh sign-in).
+        if (session.IsExpired(IdleTimeout, MaxAge) || (session.Count == 0 && session.Profile is null))
         {
             _ = ExpireAsync(id);
             return null;
@@ -164,6 +181,11 @@ public sealed class SessionStore(ILogger<SessionStore> logger)
     /// </summary>
     public async Task<(bool Found, bool SessionEnded)> RemoveAccountAsync(Session session, string accountId)
     {
+        // A profile's account belongs to the profile: removing it deletes it there (and from every
+        // other session of the profile). The session itself carries on, even with no account left.
+        if (session.Profile is { } profile)
+            return (await profile.RemoveAsync(accountId), false);
+
         var account = session.Remove(accountId);
         if (account is null)
             return (false, false);
@@ -189,8 +211,8 @@ public sealed class SessionStore(ILogger<SessionStore> logger)
 /// <summary>
 /// Drops idle/expired sessions and keeps every live account's SmarterMail token fresh, in memory.
 /// An account whose refresh fails is dropped on its own; a session left with none is closed.
-/// Remembered sessions are left alone apart from expiry: they refresh lazily, per call (see
-/// <see cref="Account.EnsureFreshAsync"/>), and are forgotten rather than revoked when they expire.
+/// Remembered and profile sessions are left alone apart from expiry: they refresh lazily, per call
+/// (see <see cref="Account.EnsureFreshAsync"/>), and are forgotten rather than revoked when they expire.
 /// Also expires pending two-factor challenges and aged-out per-host login failures.
 /// </summary>
 public sealed class SessionSweeper(
@@ -233,7 +255,7 @@ public sealed class SessionSweeper(
 
             // Every refresh rotates the refresh token. Done here, while the browser is away, it
             // would leave the browser's resume bundle holding a dead token by the time it returns.
-            if (session.IsRemembered)
+            if (session.RefreshesLazily)
                 continue;
 
             foreach (var account in session.Accounts)

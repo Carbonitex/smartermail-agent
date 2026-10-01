@@ -6,3 +6,6 @@ obj/
 *.user
 .claude/worktrees/
 CLAUDE.local.md
+
+# Server-mode data when running the agent locally (DATA_DIR defaults to ./data)
+src/Agent/data/

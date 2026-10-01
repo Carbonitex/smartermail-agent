@@ -26,9 +26,17 @@ public sealed class CatalogFixture : IDisposable
         Catalog = new ToolCatalog(
             _services.GetRequiredService<IOptions<McpServerOptions>>(),
             _services.GetRequiredService<ToolOrigins>());
+        Invoker = new ToolInvoker(
+            _services.GetRequiredService<IOptions<McpServerOptions>>(),
+            _services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>());
     }
 
     public ToolCatalog Catalog { get; }
+
+    public ToolInvoker Invoker { get; }
+
+    /// <summary>The root provider, for invoking tools the way the dispatcher does.</summary>
+    public IServiceProvider Services => _services;
 
     public void Dispose() => _services.Dispose();
 }

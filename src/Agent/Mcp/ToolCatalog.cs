@@ -137,7 +137,8 @@ public sealed class ToolCatalog
                 JsonSerializer.SerializeToNode(schema) ?? new JsonObject(),
                 entry.Category,
                 entry.Scope.ToString(),
-                entry.Write));
+                entry.Write,
+                entry.Tool.ProtocolTool.Annotations?.DestructiveHint == true));
         }
 
         return result;
@@ -180,6 +181,7 @@ public sealed class ToolCatalog
         }
     }
 
+    /// <param name="Destructive">Marked <c>Destructive = true</c>: deletes, disables or disconnects something.</param>
     public sealed record ToolDescriptor(
-        string Name, string Description, JsonNode InputSchema, string Category, string Scope, bool Write);
+        string Name, string Description, JsonNode InputSchema, string Category, string Scope, bool Write, bool Destructive = false);
 }

@@ -51,12 +51,19 @@ services:
 
   # The browser chat. Users bring their own SmarterMail logins and OpenRouter key; it has no
   # SmarterMail credentials of its own. Serve it over HTTPS (the session cookie is Secure).
+  # Server mode (default): users may keep a passkey-encrypted profile here, and with DATA_KEY
+  # run scheduled tasks. BROWSER_ONLY_MODE=true stores nothing at all (then drop the volume).
   smartermail-agent:
     image: ghcr.io/carbonitex/smartermail-agent:1
     environment:
-      RESUME_KEY: ${RESUME_KEY:-}                 # enables "Remember me on this device"; keep it stable
+      BROWSER_ONLY_MODE: ${AGENT_BROWSER_ONLY:-false}
+      DATA_KEY: ${DATA_KEY:-}                     # turns on scheduled tasks; keep it stable and out of backups of the volume
+      PUBLIC_ORIGIN: ${AGENT_PUBLIC_ORIGIN:-}     # e.g. https://mail-agent.example.com (passkeys are bound to it)
+      RESUME_KEY: ${RESUME_KEY:-}                 # "Remember me on this device" for browsers without passkey PRF
       PATH_BASE: ${AGENT_PATH_BASE:-/}            # e.g. /mail-agent when served under a path
       TRUSTED_PROXIES: ${AGENT_TRUSTED_PROXIES:-} # your reverse proxy's IP/CIDR (see docs/agent.md)
+    volumes:
+      - agent-data:/data                          # profiles and tasks (SQLite)
     ports:
       - "127.0.0.1:8107:8080"
     restart: unless-stopped
@@ -66,3 +73,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+
+volumes:
+  agent-data:

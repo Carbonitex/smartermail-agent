@@ -36,6 +36,10 @@ COPY --from=build /app .
 ENV ASPNETCORE_URLS=http://+:8080
 # Served at the site root by default; set PATH_BASE (e.g. /mail-agent) to host it under a prefix.
 ENV PATH_BASE=/
+# Server mode (the default) keeps profiles and scheduled tasks in /data: mount a volume there.
+# BROWSER_ONLY_MODE=true never touches it.
+ENV DATA_DIR=/data
+RUN mkdir -p /data && chown $APP_UID /data && chmod 700 /data
 # The image's built-in non-root user.
 USER $APP_UID
 EXPOSE 8080

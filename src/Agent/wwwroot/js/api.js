@@ -234,6 +234,142 @@ export function revokeMcpToken() {
   return request('/auth/token', { method: 'DELETE' });
 }
 
+/* ---- server mode: what this server offers ---- */
+
+/**
+ * GET /api/config → { mode: "server" | "browser", resume: { enabled, days },
+ * profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds } }.
+ */
+export function config() {
+  return request('/config');
+}
+
+/* ---- server mode: profiles (passkey-encrypted, see js/vault.js) ---- */
+
+/** POST /api/profile/register/options → { ceremonyId, profileId, options } for navigator.credentials.create. */
+export function profileRegisterOptions(label) {
+  return request('/profile/register/options', { method: 'POST', body: { label: label || null } });
+}
+
+/**
+ * POST /api/profile → SessionResponse of the new profile session (new cookie).
+ * body: { ceremonyId, credential, wrappedKey, accountsKey, publicKey, encryptedPrivateKey,
+ *         settings, recovery: { wrappedKey, authKey } | null, label }
+ */
+export function createProfile(body) {
+  return request('/profile', { method: 'POST', body });
+}
+
+/** POST /api/profile/login/options → { ceremonyId, options } for navigator.credentials.get. */
+export function profileLoginOptions() {
+  return request('/profile/login/options', { method: 'POST', body: {} });
+}
+
+/** POST /api/profile/login → { profileId, wrappedKey, credentialId, session } and a profile-session cookie (still locked). */
+export function profileLogin(ceremonyId, credential) {
+  return request('/profile/login', { method: 'POST', body: { ceremonyId, credential } });
+}
+
+/** POST /api/profile/recover → the same as profileLogin, with the recovery-wrapped key. */
+export function profileRecover(profileId, authKey) {
+  return request('/profile/recover', { method: 'POST', body: { profileId, authKey } });
+}
+
+/** POST /api/profile/unlock → { session, skipped: [{ id, baseUrl, login, role, reason }] }. 401 PROFILE_KEY_INVALID. */
+export function profileUnlock(accountsKey) {
+  return request('/profile/unlock', { method: 'POST', body: { accountsKey } });
+}
+
+/** GET /api/profile → passkeys, stored accounts (live / needs sign-in, delegated), task settings. */
+export function profile() {
+  return request('/profile');
+}
+
+/** GET /api/profile/settings → { settings, version }. */
+export function profileSettings() {
+  return request('/profile/settings');
+}
+
+/** PUT /api/profile/settings → { version }; 409 SETTINGS_STALE with the current { settings, version }. */
+export function saveProfileSettings(settings, version) {
+  return request('/profile/settings', { method: 'PUT', body: { settings, version } });
+}
+
+export function addPasskeyOptions() {
+  return request('/profile/passkeys/options', { method: 'POST', body: {} });
+}
+
+export function addPasskey(body) {
+  return request('/profile/passkeys', { method: 'POST', body });
+}
+
+export function deletePasskey(credentialId) {
+  return request('/profile/passkeys/' + encodeURIComponent(credentialId), { method: 'DELETE' });
+}
+
+/** PUT /api/profile/recovery { wrappedKey, authKey } replaces the recovery code; null removes it. */
+export function setRecovery(material) {
+  return request('/profile/recovery', { method: 'PUT', body: material || {} });
+}
+
+/** PUT /api/profile/accounts/{id}/delegation → the profile view. Scheduled tasks may use the account while nobody is signed in. */
+export function setDelegation(accountId, enabled) {
+  return request('/profile/accounts/' + encodeURIComponent(accountId) + '/delegation', { method: 'PUT', body: { enabled } });
+}
+
+/** PUT /api/profile/task-key → the profile view. The OpenRouter key scheduled tasks use; null clears it. */
+export function setTaskKey(key) {
+  return request('/profile/task-key', { method: 'PUT', body: { key: key || null } });
+}
+
+export function setTasksPaused(paused) {
+  return request('/profile/tasks-paused', { method: 'PUT', body: { paused } });
+}
+
+/** DELETE /api/profile → 204: every account revoked, every session of the profile ended. */
+export function deleteProfile() {
+  return request('/profile', { method: 'DELETE' });
+}
+
+/* ---- server mode: scheduled tasks ---- */
+
+/** GET /api/tasks → { tasks: [{ id, enabled, status, nextRunAt, lastRunAt, definition }], unread }. */
+export function tasks() {
+  return request('/tasks');
+}
+
+/** body: { name, prompt, cron, timeZone, accountIds, allowedWrites, maxWrites, model, emailAccountId, enabled } */
+export function createTask(body) {
+  return request('/tasks', { method: 'POST', body });
+}
+
+export function updateTask(id, body) {
+  return request('/tasks/' + encodeURIComponent(id), { method: 'PUT', body });
+}
+
+export function deleteTask(id) {
+  return request('/tasks/' + encodeURIComponent(id), { method: 'DELETE' });
+}
+
+/** POST /api/tasks/{id}/run → 202 { runId }. dryRun: changes are simulated, nothing is mailed. */
+export function runTask(id, dryRun) {
+  return request('/tasks/' + encodeURIComponent(id) + '/run', { method: 'POST', body: { dryRun: !!dryRun } });
+}
+
+/** GET /api/tasks/runs → newest first, without transcripts. */
+export function taskRuns(taskId) {
+  return request('/tasks/runs' + (taskId ? '?taskId=' + encodeURIComponent(taskId) : ''));
+}
+
+/** GET /api/tasks/runs/{id} → the run with its transcript, sealed to the profile's public key. */
+export function taskRun(runId) {
+  return request('/tasks/runs/' + encodeURIComponent(runId));
+}
+
+export function markRunRead(runId) {
+  return request('/tasks/runs/' + encodeURIComponent(runId) + '/read', { method: 'POST' });
+}
+
 /** Absolute URL of the MCP endpoint, for an MCP client's config. */
 export const mcpUrl = () => location.origin + appRoot() + 'mcp';
 

@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **smartermail-agent server mode**, now the default. A user can save the chat to a **profile** on
+  the server: its accounts and settings (OpenRouter key, model, tool groups), encrypted with a
+  passkey (WebAuthn PRF) the server never sees the secret of. **Sign in with passkey** brings them
+  back in any browser; a one-time recovery code is the way back if every passkey is lost.
+- **Scheduled tasks** (server mode with `DATA_KEY`): prompts the server runs on a cron schedule with
+  accounts the user explicitly lets tasks use. They only get read tools plus the write tools ticked
+  for the task, at most N changes per run, enforced by the server; **Test run** simulates changes.
+  Results are kept encrypted to the profile and can be emailed to the account's own address.
+- `GET /api/config` (the server's mode and features); `destructive` in `GET /api/tools`.
+- New settings: `BROWSER_ONLY_MODE`, `DATA_DIR`, `DATA_KEY`, `DATA_KEY_PREVIOUS`, `PUBLIC_ORIGIN`,
+  `PROFILE_MAIL_HOSTS`, `PROFILE_IDLE_DAYS`, `MAX_PROFILES`, `TASKS_ENABLED`, `TASK_*`, `LLM_BASE_URL`
+  (see `docs/agent.md`).
+
+### Changed
+
+- **Upgrading the agent:** server mode writes a SQLite database to `/data`. Mount a volume there to
+  keep profiles across container re-creation, or set `BROWSER_ONLY_MODE=true` to keep the old
+  behaviour (nothing stored). Existing sign-ins, remember-me and `/mcp` work as before in both modes;
+  where profiles are available they replace "Remember me on this device" in the UI.
+
 ### Fixed
 
 - `examples/`: `docker compose up <one service>` no longer fails because another service's settings

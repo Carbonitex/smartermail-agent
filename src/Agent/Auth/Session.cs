@@ -4,7 +4,8 @@ namespace SmarterMailAgent.Auth;
 
 /// <summary>
 /// One browser session: its clocks and the SmarterMail accounts signed in to it. Everything here
-/// lives in memory and is dropped on logout or expiry. Nothing is persisted.
+/// lives in memory and is dropped on logout or expiry. A browser-only session owns its accounts; a
+/// profile session (server mode) borrows its profile's (<see cref="Profile"/>).
 /// </summary>
 public sealed class Session : IAsyncDisposable
 {
@@ -14,7 +15,6 @@ public sealed class Session : IAsyncDisposable
     public DateTimeOffset LastSeenAt { get; private set; } = DateTimeOffset.UtcNow;
 
     private readonly object _lock = new();
-    private readonly List<Account> _accounts = [];
     private int _disposed;
     private long _resumeVersion;
     private RememberWindow? _remember;
@@ -126,107 +126,59 @@ public sealed class Session : IAsyncDisposable
                    CryptographicOperations.FixedTimeEquals(_mcpTokenHash, hash);
     }
 
-    /// <summary>A snapshot, in the order the accounts were added.</summary>
-    public IReadOnlyList<Account> Accounts
-    {
-        get { lock (_lock) return _accounts.ToArray(); }
-    }
-
-    public int Count
-    {
-        get { lock (_lock) return _accounts.Count; }
-    }
-
-    public enum AddStatus { Added, Replaced, LimitReached }
+    /// <summary>The accounts this chat can use: its own, or its profile's shared set.</summary>
+    public AccountSet AccountSet { get; }
 
     /// <summary>
-    /// Adds <paramref name="account"/> and gives it a handle unique within this session. An existing
-    /// account with the same (baseUrl, email) is replaced in place and returned in
-    /// <paramref name="replaced"/>; the caller disposes it. At <paramref name="maxAccounts"/> nothing
-    /// changes and <see cref="AddStatus.LimitReached"/> comes back.
+    /// Set when this session belongs to a server-mode profile. Its accounts are then the profile's,
+    /// shared with the profile's other sessions and its scheduled tasks; closing the session only
+    /// releases its hold on them (<see cref="Profiles.ProfileRuntime.ReleaseSession"/>).
     /// </summary>
-    public AddStatus Add(Account account, int maxAccounts, out Account? replaced)
+    public Profiles.ProfileRuntime? Profile { get; }
+
+    /// <summary>A browser-only session that owns its accounts.</summary>
+    public Session()
     {
-        lock (_lock)
-        {
-            var index = _accounts.FindIndex(a => SameLogin(a, account.BaseUrl, account.EmailAddress));
-            var existing = index >= 0 ? _accounts[index] : null;
-            replaced = existing;
-
-            if (existing is null && _accounts.Count >= maxAccounts)
-                return AddStatus.LimitReached;
-
-            var others = _accounts.Where(a => !ReferenceEquals(a, existing)).Select(a => a.Handle);
-            account.Handle = UniqueHandle(
-                Account.BaseHandle(account.Role, account.EmailAddress, account.BaseUrl),
-                Account.HostOf(account.BaseUrl), others);
-            account.Rotated = BumpResumeVersion;
-            BumpResumeVersion();
-
-            if (existing is not null)
-            {
-                _accounts[index] = account;
-                return AddStatus.Replaced;
-            }
-
-            _accounts.Add(account);
-            return AddStatus.Added;
-        }
+        AccountSet = new AccountSet();
+        AccountSet.Changed += BumpResumeVersion;
     }
+
+    /// <summary>A session of <paramref name="profile"/>, which must already count it (<c>AcquireSession</c>).</summary>
+    public Session(Profiles.ProfileRuntime profile)
+    {
+        Profile = profile;
+        AccountSet = profile.Accounts;
+        AccountSet.Changed += BumpResumeVersion;
+    }
+
+    /// <summary>
+    /// Whether the dispatcher refreshes tokens per call instead of the sweeper refreshing them on a
+    /// clock: remembered sessions (the browser holds a copy of the refresh tokens) and profile
+    /// sessions (the stored copy is rewritten on every rotation; fewer rotations, fewer writes).
+    /// </summary>
+    public bool RefreshesLazily => IsRemembered || Profile is not null;
+
+    /// <summary>A snapshot, in the order the accounts were added.</summary>
+    public IReadOnlyList<Account> Accounts => AccountSet.Accounts;
+
+    public int Count => AccountSet.Count;
+
+    /// <inheritdoc cref="Auth.AccountSet.Add"/>
+    public AccountSet.AddStatus Add(Account account, int maxAccounts, out Account? replaced) =>
+        AccountSet.Add(account, maxAccounts, out replaced);
 
     /// <summary>Whether adding this login would need a free slot (false when it would replace one).</summary>
-    public bool IsFullFor(string baseUrl, string emailAddress, int maxAccounts)
-    {
-        lock (_lock)
-            return _accounts.Count >= maxAccounts && !_accounts.Any(a => SameLogin(a, baseUrl, emailAddress));
-    }
+    public bool IsFullFor(string baseUrl, string emailAddress, int maxAccounts) =>
+        AccountSet.IsFullFor(baseUrl, emailAddress, maxAccounts);
 
     /// <summary>Detaches the account; the caller disposes it.</summary>
-    public Account? Remove(string accountId)
-    {
-        lock (_lock)
-        {
-            var index = _accounts.FindIndex(a => string.Equals(a.Id, accountId, StringComparison.Ordinal));
-            if (index < 0) return null;
-            var account = _accounts[index];
-            _accounts.RemoveAt(index);
-            BumpResumeVersion();
-            return account;
-        }
-    }
+    public Account? Remove(string accountId) => AccountSet.Remove(accountId);
 
-    public Account? Find(string? handle)
-    {
-        if (string.IsNullOrEmpty(handle)) return null;
-        lock (_lock)
-            return _accounts.FirstOrDefault(a => string.Equals(a.Handle, handle, StringComparison.OrdinalIgnoreCase));
-    }
+    public Account? Find(string? handle) => AccountSet.Find(handle);
 
-    /// <summary>
-    /// <paramref name="baseHandle"/>, or <c>baseHandle#host</c> on a clash, then a counter. Handles
-    /// compare case-insensitively because they are mostly email addresses.
-    /// </summary>
-    public static string UniqueHandle(string baseHandle, string host, IEnumerable<string> existing)
-    {
-        var taken = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
-        if (!taken.Contains(baseHandle))
-            return baseHandle;
-
-        var withHost = $"{baseHandle}#{host}";
-        if (!taken.Contains(withHost))
-            return withHost;
-
-        for (var n = 2; ; n++)
-        {
-            var candidate = $"{withHost}-{n}";
-            if (!taken.Contains(candidate))
-                return candidate;
-        }
-    }
-
-    private static bool SameLogin(Account account, string baseUrl, string emailAddress) =>
-        string.Equals(account.BaseUrl.TrimEnd('/'), baseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(account.EmailAddress, emailAddress, StringComparison.OrdinalIgnoreCase);
+    /// <inheritdoc cref="Auth.AccountSet.UniqueHandle"/>
+    public static string UniqueHandle(string baseHandle, string host, IEnumerable<string> existing) =>
+        AccountSet.UniqueHandle(baseHandle, host, existing);
 
     /// <summary>Closes the session and revokes every account's tokens on SmarterMail.</summary>
     public ValueTask DisposeAsync() => ReleaseAsync(revoke: true);
@@ -242,13 +194,20 @@ public sealed class Session : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        Account[] accounts;
         lock (_lock)
-        {
-            accounts = _accounts.ToArray();
-            _accounts.Clear();
             _mcpTokenHash = null;
+
+        AccountSet.Changed -= BumpResumeVersion;
+
+        // A profile's accounts outlive any one of its sessions: logging out (or idling out) of one
+        // browser locks that browser, and the profile decides what to forget once no session is left.
+        if (Profile is not null)
+        {
+            await Profile.ReleaseSessionAsync();
+            return;
         }
+
+        var accounts = AccountSet.TakeAll();
 
         // In parallel: each disposal revokes on its own mail server with a bounded wait, so closing
         // a full session costs one timeout at worst, not one per account.

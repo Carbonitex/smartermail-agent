@@ -29,7 +29,8 @@ public interface IToolAccount
 /// One SmarterMail login inside a browser session. Everything here lives in memory and is dropped
 /// when the account is removed, its refresh fails, or its session ends; its tokens are revoked on
 /// SmarterMail at the same time (best effort) — except when a remembered session expires, whose
-/// browser still holds them in its resume bundle. Nothing is persisted.
+/// browser still holds them in its resume bundle, or a profile forgets it, whose store still holds
+/// its refresh token (server mode, <see cref="Persist"/>).
 /// </summary>
 public sealed class Account : IToolAccount, IAsyncDisposable
 {
@@ -59,6 +60,7 @@ public sealed class Account : IToolAccount, IAsyncDisposable
 
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private int _disposed;
+    private volatile bool _releaseRevokes = true;
 
     public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
@@ -85,6 +87,14 @@ public sealed class Account : IToolAccount, IAsyncDisposable
     /// refresh token. <see cref="Session.Add"/> points it at the session's resume version.
     /// </summary>
     internal Action? Rotated { get; set; }
+
+    /// <summary>
+    /// Server mode: writes the rotated refresh token to the profile store. Awaited <b>inside</b> the
+    /// refresh lock, so no second refresh can rotate past a copy that was never saved, and a crash
+    /// right after a refresh leaves the newest token on disk. A failure is logged by the caller's
+    /// hook and does not fail the refresh: the account keeps working in memory.
+    /// </summary>
+    internal Func<Account, Task>? Persist { get; set; }
 
     /// <summary>
     /// Refreshes the SmarterMail access token in memory and pushes it into the UserContext.
@@ -137,8 +147,12 @@ public sealed class Account : IToolAccount, IAsyncDisposable
             {
                 // Disposed while this refresh was in flight. DisposeAsync is waiting for the lock (or
                 // gave up and revoked the old pair); either way only this path has the pair just
-                // minted, so revoke it here before it can outlive the account on SmarterMail.
-                if (ok)
+                // minted, so revoke it here before it can outlive the account on SmarterMail. A
+                // profile account that is only being forgotten saves the new pair instead: its store
+                // still holds the pair this refresh just rotated dead.
+                if (ok && !_releaseRevokes && Persist is { } late)
+                    await late(this);
+                else if (ok)
                     await Auth.LogoutAsync(TokenData, CancellationToken.None);
                 TokenData.AccessToken = null;
                 TokenData.RefreshToken = null;
@@ -149,6 +163,8 @@ public sealed class Account : IToolAccount, IAsyncDisposable
             {
                 UserContextFactory.ApplyRefreshedToken(UserContext, TokenData);
                 LastTokenRefresh = DateTimeOffset.UtcNow;
+                if (Persist is { } persist)
+                    await persist(this);
                 Rotated?.Invoke();
             }
             return result;
@@ -207,6 +223,10 @@ public sealed class Account : IToolAccount, IAsyncDisposable
 
     private async ValueTask ReleaseAsync(bool revoke)
     {
+        // Written before _disposed, so a refresh that sees the account disposed also sees how.
+        if (IsDisposed)
+            return;
+        _releaseRevokes = revoke;
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 

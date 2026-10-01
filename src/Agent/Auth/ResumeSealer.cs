@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -48,11 +47,7 @@ public sealed class ResumeSealer
     /// <summary>Longer than any real bundle (five accounts are a few KB); refused before decoding.</summary>
     public const int MaxBundleLength = 32 * 1024;
 
-    private const byte Format = 0x01;
-    private const int NonceSize = 12;
-    private const int TagSize = 16;
-    private const int HeaderSize = 2;
-    private static readonly byte[] Label = Encoding.ASCII.GetBytes("sma-resume-v1");
+    private const string Label = "sma-resume-v1";
 
     /// <summary>Tolerated clock skew for a bundle that claims to come from the future.</summary>
     private static readonly TimeSpan Skew = TimeSpan.FromMinutes(5);
@@ -62,9 +57,7 @@ public sealed class ResumeSealer
         Converters = { new JsonStringEnumConverter() },
     };
 
-    private readonly byte[]? _current;
-    private readonly byte _currentId;
-    private readonly byte[][] _all;
+    private readonly Sealer? _sealer;
 
     public ResumeSealer(byte[]? key, byte[]? previousKey = null, int days = DefaultDays)
     {
@@ -73,9 +66,7 @@ public sealed class ResumeSealer
         if (previousKey is { Length: not 32 })
             throw new ArgumentException("RESUME_KEY_PREVIOUS must be 32 bytes.", nameof(previousKey));
 
-        _current = key;
-        _currentId = key is null ? (byte)0 : KeyId(key);
-        _all = key is null ? [] : previousKey is null ? [key] : [key, previousKey];
+        _sealer = key is null ? null : new Sealer(key, previousKey);
         MaxAge = TimeSpan.FromDays(Math.Clamp(days, 1, MaxDays));
     }
 
@@ -113,11 +104,11 @@ public sealed class ResumeSealer
         if (string.IsNullOrWhiteSpace(value))
             return null;
 
-        var bytes = FromBase64Url(value.Trim());
+        var bytes = Base64Url.Decode(value);
         return bytes is { Length: 32 } ? bytes : null;
     }
 
-    public bool Enabled => _current is not null;
+    public bool Enabled => _sealer is not null;
 
     /// <summary>The remember chain's absolute lifetime from the original sign-in (<c>RESUME_DAYS</c>).</summary>
     public TimeSpan MaxAge { get; }
@@ -170,65 +161,40 @@ public sealed class ResumeSealer
     /// <summary>Seals an arbitrary payload under the current key. Tests use it to build odd bundles.</summary>
     internal string SealPayload(ResumePayload payload)
     {
-        if (_current is null)
+        if (_sealer is null)
             throw new InvalidOperationException("Remember-me is disabled (no RESUME_KEY).");
 
         var plaintext = JsonSerializer.SerializeToUtf8Bytes(payload, Json);
-        var output = new byte[HeaderSize + NonceSize + plaintext.Length + TagSize];
-        output[0] = Format;
-        output[1] = _currentId;
-
-        var nonce = output.AsSpan(HeaderSize, NonceSize);
-        RandomNumberGenerator.Fill(nonce);
-
-        using var aes = new AesGcm(_current, TagSize);
-        aes.Encrypt(nonce, plaintext,
-            output.AsSpan(HeaderSize + NonceSize, plaintext.Length),
-            output.AsSpan(HeaderSize + NonceSize + plaintext.Length, TagSize),
-            Aad(output[0], output[1]));
-
-        CryptographicOperations.ZeroMemory(plaintext);
-        return ToBase64Url(output);
+        try
+        {
+            return _sealer.SealString(plaintext, Label);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+        }
     }
 
     /// <summary>Opens and validates a bundle. Accounts past their own refresh expiry are kept; the caller skips them.</summary>
     public UnsealResult Unseal(string? bundle)
     {
-        if (!Enabled || string.IsNullOrEmpty(bundle) || bundle.Length > MaxBundleLength)
+        if (_sealer is null || string.IsNullOrEmpty(bundle) || bundle.Length > MaxBundleLength)
             return Fail(UnsealFailure.Malformed);
 
-        var data = FromBase64Url(bundle);
-        if (data is null || data.Length < HeaderSize + NonceSize + TagSize + 2 || data[0] != Format)
+        var data = Base64Url.Decode(bundle);
+        if (data is null || data.Length < Sealer.HeaderSize + Sealer.NonceSize + Sealer.TagSize + 2)
             return Fail(UnsealFailure.Malformed);
 
-        var candidates = _all.Where(k => KeyId(k) == data[1]).ToList();
-        if (candidates.Count == 0)
-            return Fail(UnsealFailure.UnknownKey);
-
-        var nonce = data.AsSpan(HeaderSize, NonceSize);
-        var cipherLength = data.Length - HeaderSize - NonceSize - TagSize;
-        var ciphertext = data.AsSpan(HeaderSize + NonceSize, cipherLength);
-        var tag = data.AsSpan(HeaderSize + NonceSize + cipherLength, TagSize);
-        var plaintext = new byte[cipherLength];
-
-        var opened = false;
-        foreach (var key in candidates)
+        var plaintext = _sealer.Open(data, Label, out var failure);
+        if (plaintext is null)
         {
-            try
+            return Fail(failure switch
             {
-                using var aes = new AesGcm(key, TagSize);
-                aes.Decrypt(nonce, ciphertext, tag, plaintext, Aad(data[0], data[1]));
-                opened = true;
-                break;
-            }
-            catch (CryptographicException)
-            {
-                // Tag mismatch; try the other key if both share the id byte.
-            }
+                Sealer.OpenFailure.UnknownKey => UnsealFailure.UnknownKey,
+                Sealer.OpenFailure.Tampered => UnsealFailure.Tampered,
+                _ => UnsealFailure.Malformed,
+            });
         }
-
-        if (!opened)
-            return Fail(UnsealFailure.Tampered);
 
         ResumePayload? payload;
         try
@@ -267,32 +233,4 @@ public sealed class ResumeSealer
         DateTimeOffset.TryParse(account.RefreshExpiration, out var expiration) && expiration <= DateTimeOffset.UtcNow;
 
     private static UnsealResult Fail(UnsealFailure failure) => new(null, failure);
-
-    private static byte KeyId(byte[] key) => SHA256.HashData(key)[0];
-
-    private static byte[] Aad(byte format, byte keyId)
-    {
-        var aad = new byte[Label.Length + HeaderSize];
-        Label.CopyTo(aad, 0);
-        aad[Label.Length] = format;
-        aad[Label.Length + 1] = keyId;
-        return aad;
-    }
-
-    private static string ToBase64Url(byte[] bytes) =>
-        Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
-
-    private static byte[]? FromBase64Url(string value)
-    {
-        var s = value.Replace('-', '+').Replace('_', '/');
-        s = s.PadRight(s.Length + (4 - s.Length % 4) % 4, '=');
-        try
-        {
-            return Convert.FromBase64String(s);
-        }
-        catch (FormatException)
-        {
-            return null;
-        }
-    }
 }

@@ -33,7 +33,7 @@ examples/                     docker-compose.yml, .env.example, MCP client confi
 |---|---|---|---|
 | `src/McpUser` | `ghcr.io/carbonitex/smartermail-mcp-user` | 8080 (HTTP) or stdio | fixed, env `SMARTERMAIL_URL` / `_USER` / `_PASSWORD`; `API_KEY` for HTTP |
 | `src/McpAdmin` | `ghcr.io/carbonitex/smartermail-mcp-admin` | 8080 (HTTP) or stdio | fixed sysadmin, env `SMARTERMAIL_ADMIN_USER` / `_PASSWORD`; `API_KEY` for HTTP |
-| `src/Agent` | `ghcr.io/carbonitex/smartermail-agent` | 8080 | whoever signs in, in memory only |
+| `src/Agent` | `ghcr.io/carbonitex/smartermail-agent` | 8080 | whoever signs in; in memory, plus passkey-encrypted profiles under `DATA_DIR` in server mode |
 
 Each host has its own `Dockerfile` under `src/<Host>/`, and every one is built with the **repo root**
 as context: `docker buildx build -f src/<Host>/Dockerfile .`. The root `.dockerignore` keeps
@@ -98,7 +98,7 @@ Two xunit projects:
 | Project | Covers | Gates images |
 |---|---|---|
 | `tests/SmarterMail.Tests` | Core (`StartupSignIn`, `AuthResponseClassifier`, per-sign-in clientIds), tool-library guards (below), `Mcp.Hosting` (settings, read-only filter), `docs/tools.md` freshness | user, admin, agent |
-| `tests/Agent.Tests` | agent: policy, schemas, dispatch, roles, session accounts, account logout, `UserContextFactory`, MCP token scoping (in-process host via `WebApplicationFactory<Program>`), remember-me, proxy trust, connect-time SSRF guard, path base, home link | agent |
+| `tests/Agent.Tests` | agent: policy, schemas, dispatch, roles, session accounts, account logout, `UserContextFactory`, MCP token scoping (in-process host via `WebApplicationFactory<Program>`), remember-me, proxy trust, connect-time SSRF guard, path base, home link; server mode: options, both modes over HTTP, sealer, SQLite store, profile runtime, a full passkey round trip (`SoftAuthenticator`), task definitions, the task gate, the server-side loop, a scheduled run against a fake LLM (`FakeLlm`). Runs serially (see `TestEnvironment.cs`) | agent |
 
 The guards in `tests/SmarterMail.Tests`:
 
@@ -165,22 +165,50 @@ One chat can hold **several signed-in accounts at once** (up to `SESSION_MAX_ACC
 possibly on different servers: mailbox users, domain admins and system admins. Each account gets
 the tools its role allows, and the agent picks one per call with an `account` argument.
 
-The .NET service is a **relay**, not an LLM host:
+The .NET service is a **relay**; in server mode it also keeps profiles and runs scheduled tasks:
 
 - SmarterMail sends no CORS headers, so the browser cannot call the user's mail server directly.
   This service does it on the browser's behalf.
 - The OpenRouter loop runs **in the browser**. The server never sees an OpenRouter key and never
   pays for inference.
-- SmarterMail tokens live **in memory only**, for the life of a session. Nothing is written to disk.
-  With "Remember me on this device" the **browser** keeps a sealed copy of the refresh tokens;
-  the server still stores nothing per user (see [Remember me on this device](#remember-me-on-this-device)).
+- SmarterMail tokens live **in memory**, for the life of a session. With "Remember me on this device"
+  the **browser** keeps a sealed copy of the refresh tokens (see
+  [Remember me on this device](#remember-me-on-this-device)).
+- **Two modes** (`Server/ServerOptions.cs`). **Server mode**, the default: a user may save a
+  passkey-encrypted **profile** (accounts + settings) in SQLite under `DATA_DIR`, and with `DATA_KEY`
+  run **scheduled tasks**, the only time the server itself calls an LLM. **`BROWSER_ONLY_MODE=true`**:
+  none of that is even registered, `DATA_DIR` is never touched, and the agent stores nothing per user.
+  carbonitex.dev runs browser-only. See [Server mode](#server-mode-profiles-and-scheduled-tasks).
 
 ## Architecture
 
 ```
 Program.cs                    composition root, middleware, MCP registration, MCP list/call filters
+Server/
+  ServerOptions.cs            BROWSER_ONLY_MODE, DATA_DIR, DATA_KEY, PUBLIC_ORIGIN, TASK_* (from IConfiguration)
+  ServerModeOnlyAttribute.cs  404 SERVER_MODE_DISABLED before a profile/task controller is built
+Storage/
+  DataStore.cs                SQLite file, migrations on PRAGMA user_version, ADO helpers
+  ProfileStore.cs             profiles, passkeys, stored accounts (rows hold sealed blobs)
+  TaskStore.cs                tasks and their runs
+Profiles/
+  ProfileRuntime.cs           one live owner of a profile's accounts (+ ProfileRegistry: leases)
+  ProfileCrypto.cs            accounts-key check, recovery hash, sealing to the profile's public key
+  PasskeyService.cs           WebAuthn ceremonies (fido2-net-lib), single-use, 2 minutes
+  ProfileMaintenance.cs       ceremony sweep; daily idle-profile pruning and delegated-account keep-alive
+Llm/
+  OpenRouterClient.cs         non-streaming chat completions for scheduled runs
+  AgentLoop.cs                the tool loop (port of llm.js runTurn)
+Tasks/
+  TaskDefinition.cs           sealed definition, cron (Cronos) + time zone, validation
+  TaskPrompt.cs               the unattended system prompt
+  TaskRunner.cs               one run: accounts, gate, loop, sealed transcript, optional email
+  TaskRunScheduler.cs         30 s tick, claim, concurrency, "Run now"
 Auth/
   HostGuard.cs                SSRF guard (scheme + resolved-IP checks)
+  Sealer.cs                   AES-256-GCM framing with key rotation, label + row-context AAD (+ Base64Url)
+  AccountSet.cs               a set of accounts with unique handles: a session's own, or a profile's shared one
+  AccountBuilder.cs           Account from a sign-in or a refreshed stored token; AccountRestorer (resume/unlock/tasks)
   GuardedHttp.cs              handler for every outbound SmarterMail call: HostGuard re-checked at
                               connect time (DNS rebinding), no redirects, no proxy
   PendingLoginStore.cs        in-memory two-factor challenges, optionally bound to a session
@@ -202,11 +230,14 @@ Controllers/
   AccountsController.cs       /api/accounts (add / remove an account in the current session)
   ResumeController.cs         /api/auth/resume (remember me: config, enable / fetch / disable, resume)
   ToolsController.cs          /api/tools, /api/tools/call
+  ConfigController.cs         /api/config (mode and what this server offers)
+  ProfileController.cs        /api/profile/* (server mode)
+  TasksController.cs          /api/tasks/* (server mode with DATA_KEY)
 Mcp/
   ToolPolicy.cs               THE policy: registered tool classes → scope + category, role→scope,
                               write classification, eligibility, `account` injection + resolution
   ToolCatalog.cs              explicit tool registration (WithAgentTools) + per-session tool lists
-  ToolDispatcher.cs           the one call path for /api/tools/call and /mcp
+  ToolDispatcher.cs           the one call path for /api/tools/call, /mcp and scheduled runs (IToolContext, ToolGate)
   ToolInvoker.cs              invokes an McpServerTool outside the JSON-RPC pipeline
   NoopTransport.cs            throwaway transport for the above
 Logging/CoreConsoleFilter.cs  drops Core's (src/Core) Console chatter (leaks mail metadata)
@@ -215,6 +246,11 @@ Web/
   ProxyTrust.cs               TRUSTED_PROXIES / TRUST_CF_CONNECTING_IP: forwarded headers + rate-limit key
   ResumeHeaders.cs            X-Resume-Version on cookie responses; /api responses no-store
 wwwroot/                      the browser UI (owned by the frontend; wwwroot/dev/ is not shipped)
+  js/vault.js                 profile cryptography (pure WebCrypto; node-tested, incl. a C#-sealed vector)
+  js/passkey.js               WebAuthn glue: options in, credentials out WITHOUT clientExtensionResults
+  js/profile.js               profile flows (create, passkey / recovery sign-in, unlock, settings sync)
+  js/profile-ui.js            passkey panel, "save to a profile" offer, Profile menu, recovery-code dialog
+  js/tasks.js                 the Tasks dialog: list, editor (cron presets), runs, transcript viewer
 ```
 
 Outside `src/Agent/`:
@@ -234,6 +270,10 @@ tests/Agent.Tests/            xunit: policy, schema injection, dispatch resoluti
 ```
 
 ### Tokens never touch disk
+
+In browser-only mode, nothing does. In server mode the one exception is a **profile's stored
+accounts**: their refresh tokens (never access tokens), sealed, in `profile_accounts` (see
+[Server mode](#server-mode-profiles-and-scheduled-tasks)). Core's token file is still never used.
 
 Core's `AuthenticationService.AuthenticateAsync` writes `TokenData` through
 `GlobalContext.WriteTokenFile()` and **fails** if the write fails, and `UserContext`'s refresh path
@@ -317,7 +357,7 @@ header (seconds): too many failed sign-ins to **that mail server** from this ser
 [Per-server failed-login cap](#per-server-failed-login-cap)). Refused before SmarterMail is called;
 `error` is user-facing ("… Try again in N minutes."). The per-IP limiters' own `429` has no body.
 
-`SessionResponse` = `{ expiresAt, maxAccounts, remembered, accounts: [{ id, handle, role, username, emailAddress, domain, baseUrl, readOnly }], mcpToken: { active, expiresAt } }`,
+`SessionResponse` = `{ expiresAt, maxAccounts, remembered, accounts: [{ id, handle, role, username, emailAddress, domain, baseUrl, readOnly }], mcpToken: { active, expiresAt }, profile: { id, unlocked } | null }`,
 `role` ∈ `"User" | "DomainAdmin" | "SysAdmin"`; `remembered` = "Remember me on this device" is on;
 `mcpToken.expiresAt` is `null` when no token is active.
 
@@ -348,9 +388,11 @@ whose resume version is newer, carries `X-Resume-Version: <newer>`; the browser 
 | `GET /api/auth/resume` | session, **cookie only** | `200 BundleResponse`, `404 { code: "NOT_REMEMBERED" }` |
 | `DELETE /api/auth/resume` | session, **cookie only** | `204`: stop remembering; the session carries on (and the sweeper's refreshes soon kill any copy of the bundle) |
 | `POST /api/auth/resume` | none, `login` limiter | `{ bundle }` → `200 { ...SessionResponse, bundle, version, rememberedUntil, skipped: [{ baseUrl, login, role, reason }] }` + `sma_session` cookie; `reason` ∈ `REJECTED EXPIRED UNAVAILABLE BLOCKED_HOST ACCOUNT_LIMIT`. `400 { code: "RESUME_INVALID" }` unreadable / tampered / other key. `401 { code: "RESUME_EXPIRED", skipped }` past `RESUME_DAYS`, or no account could be refreshed. `503 { code: "RESUME_UNAVAILABLE", skipped }` no account came back and a mail server did not answer (keep the bundle). `HOST_THROTTLED` for any account's server, before anything is refreshed. |
-| `GET /api/tools` | session | `200 [ { name, description, inputSchema, category, scope, write } ]` — only tools with at least one eligible account; `inputSchema` carries the injected `account` property (below) |
+| `GET /api/tools` | session | `200 [ { name, description, inputSchema, category, scope, write, destructive } ]` — only tools with at least one eligible account; `inputSchema` carries the injected `account` property (below) |
 | `POST /api/tools/call` | session, `api` limiter (120/min/IP) | `{ name, arguments: {…, account?} }` → `200 { isError, content, account }` (`account` = the handle it ran as, `null` if refused before resolving). Tool exceptions **and payloads carrying `success:false`** → `isError: true`. Missing / unknown / wrong-role `account` → `200 isError` listing the valid handles. Write tool on a read-only account → `403 { error }` naming the handle. Unknown tool → `404`. |
 | `POST /mcp` | session cookie **or** `Authorization: Bearer <MCP token>` (`401` + `WWW-Authenticate: Bearer` for a bad/expired/revoked token or a raw session id) | Stateless MCP, same per-session tool list and schemas, same dispatcher. Account and read-only refusals are `isError: true`; tool results pass through unchanged. |
+| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds } }` |
+| `/api/profile/*`, `/api/tasks/*` | see [Server mode](#server-mode-profiles-and-scheduled-tasks) | `404 SERVER_MODE_DISABLED` in browser-only mode |
 | `GET /health` | none | `smartermail-agent ok` |
 
 Tool names are MCP snake_case (`get_emails`); argument names are camelCase (`folderId`, `take`) as
@@ -509,7 +551,12 @@ what makes a failure diagnosable.
 - Sessions are **not** disposed on process shutdown (`SessionStore` is not disposable), so a
   restart or redeploy leaves live accounts' tokens valid on SmarterMail until they expire — which
   is also what lets a remembered browser resume after a redeploy.
-- Conversation history is never stored server-side. Nothing about the user is persisted anywhere.
+- Conversation history is never stored server-side, in either mode. In browser-only mode nothing about
+  the user is persisted anywhere; in server mode, only what a user saves to a profile.
+- **Profile sessions** (`Session(ProfileRuntime)`) borrow the profile's `AccountSet` instead of owning
+  one. Closing one (logout, idle, expiry) releases a lease on the profile and touches no account;
+  they refresh lazily (`RefreshesLazily`), may hold zero accounts, and removing an account deletes it
+  from the profile. A browser bundle (remember-me) is refused for them (`409 PROFILE_SESSION`).
 
 ### MCP tokens
 
@@ -663,6 +710,94 @@ signal first:
 
 The role **only decides which tools are visible**. SmarterMail still authorizes every call, so a
 wrong role gives a wrong tool list, never extra privilege.
+
+## Server mode: profiles and scheduled tasks
+
+Off entirely with `BROWSER_ONLY_MODE=true`: `Program.cs` registers no store, runtime, passkey service,
+maintenance or scheduler, a middleware answers `/api/profile*` and `/api/tasks*` with
+`404 SERVER_MODE_DISABLED` ahead of authentication, and `ServerModeOnlyAttribute` repeats the check.
+`ServerModeHttpTests` asserts that `DATA_DIR` is never created then.
+
+### Keys
+
+Made in the browser (`js/vault.js`), HKDF-SHA-256 with a zero salt:
+
+| Key | From | Where it goes |
+|---|---|---|
+| profile key PK | 32 random bytes | wrapped (AES-GCM) under each passkey's PRF output (`sma-profile-wrap-v1`, PRF salt `smartermail-agent profile v1`) and optionally a recovery code (`sma-recovery-wrap-v1`); the wraps are stored, PK never leaves the browser |
+| settings key | `HKDF(PK, sma-settings-v1)` | never leaves the browser; encrypts `{ openRouterKey, model, toolsOff }` |
+| accounts key | `HKDF(PK, sma-accounts-v1)`, raw | sent to `unlock`; `ProfileRuntime` keeps it (as a `Sealer`) while a session of the profile lives; the server stores only `HMAC(key, "sma-accounts-check-v1")` |
+| inbox key | `HKDF(PK, sma-inbox-v1)` | encrypts the PKCS#8 private half of a P-256 key pair; the public half is stored, and `ProfileCrypto.SealToPublicKey` seals every run transcript to it |
+| recovery auth | `HKDF(code secret, sma-recovery-auth-v1)` | sent to `recover`; the server stores its SHA-256 |
+| `DATA_KEY` | the operator | seals delegated accounts (`sma-server-account-v1`), task definitions, the tasks' OpenRouter key |
+
+Every server-side seal is `Auth/Sealer.cs` with a label per use and the row as context
+(`profileId|rowId`), so a blob moved to another row or use does not open. **The PRF output must never
+reach the server**: `js/passkey.js` serialises credentials by hand with empty
+`clientExtensionResults` (`toJSON()` would include it), and `PasskeyService` discards that field anyway.
+
+### One owner per stored account
+
+SmarterMail keeps one token per `(user, clientId)`, so two live copies of a stored account (two
+browsers, or a browser and a task) would rotate each other's refresh token dead. `ProfileRegistry`
+hands out one `ProfileRuntime` per profile, counted by session and task **leases**; every session of
+the profile and every run share its `AccountSet`, i.e. the same `Account` objects and refresh locks.
+Each rotation is saved by `Account.Persist`, awaited inside the refresh lock; a refresh that lands
+after a *forget* saves the new pair instead of revoking it. When the last session lease goes, the
+accounts sealed with the accounts key are forgotten and the key dropped; delegated ones may stay for a
+running task. When no lease is left the runtime leaves the registry.
+
+Stored rows (`profile_accounts`): `seal` = `profile` (accounts key) or `server` (`DATA_KEY`,
+"delegated"), exactly one copy, re-sealed when delegation changes. `state` = `ok` or `rejected`
+(SmarterMail refused the token): the row stays so the UI can ask for a sign-in, and a new sign-in to the
+same login reuses the row id (`RowForLogin`), which tasks refer to.
+
+### Flows
+
+- **Create** (`POST /api/profile/register/options`, then `POST /api/profile`, cookie session with an
+  account): verifies the passkey, writes the profile, its passkey and every account sealed with the new
+  accounts key, moves the session's live accounts into the runtime, and swaps the cookie for a profile
+  session. `PROFILE_MAIL_HOSTS` and `MAX_PROFILES` apply.
+- **Sign in** (`POST /api/profile/login/options` with the two-factor limiter, because the page
+  prefetches them; `POST /api/profile/login`): any discoverable credential; opens a **locked** profile
+  session and returns that passkey's wrapped PK. **Recover** (`POST /api/profile/recover`) does the same
+  with the recovery auth key.
+- **Unlock** (`POST /api/profile/unlock { accountsKey }`): checked against the stored HMAC, then
+  `RestoreAsync` refreshes every row it can open (`AccountRestorer`: SSRF guard, per-server throttle,
+  a throttled server is skipped as `THROTTLED`), saves the rotated tokens, and answers
+  `{ session, skipped }` with resume's reasons.
+- `GET /api/profile` (passkeys, accounts live / stored / delegated, task settings),
+  `GET|PUT /api/profile/settings` (opaque blob, optimistic `version`, `409 SETTINGS_STALE`),
+  `POST /api/profile/passkeys/options` + `POST /api/profile/passkeys`, `DELETE /api/profile/passkeys/{id}`
+  (`409 LAST_PASSKEY`), `PUT /api/profile/recovery`, `PUT /api/profile/accounts/{id}/delegation`,
+  `PUT /api/profile/task-key`, `PUT /api/profile/tasks-paused`, `DELETE /api/profile` (revokes every
+  account, ends every session of it). All cookie-only (`403 COOKIE_REQUIRED` for an MCP token).
+
+### Scheduled tasks
+
+`TasksController` (`/api/tasks`, `/api/tasks/{id}`, `/api/tasks/{id}/run { dryRun }`,
+`/api/tasks/runs[?taskId]`, `/api/tasks/runs/{id}`, `/api/tasks/runs/{id}/read`), only with `DATA_KEY`.
+
+- **Definition** (`TaskDefinition`, sealed with `DATA_KEY`): name, prompt, five-field cron + IANA time
+  zone, delegated account ids, `allowedWrites` (tool names), `maxWrites`, model, optional
+  `emailAccountId`. Validation: shortest gap ≥ `TASK_MIN_INTERVAL_MINUTES` over 200 occurrences,
+  accounts delegated, every allowed write a real write tool some task account's role can run, writes
+  and email need a read-write account.
+- **Scheduler** (`TaskRunScheduler`): every 30 s claims due tasks (`next_run_at` moved on first, so a
+  run never starts twice; downtime collapses into one catch-up run), at most `TASK_CONCURRENCY`, never
+  two runs of one task. Runs left `running` by a crash become `INTERRUPTED` at start.
+- **Run** (`TaskRunner`): task key first (no key, no token rotation), then the accounts from the
+  runtime (restored from their server-sealed rows if nobody is signed in), then `AgentLoop` with
+  `TaskPrompt` and a `TaskToolContext` whose **`ToolGate`** the dispatcher enforces: writes not on the
+  allowlist are `NotAllowed`, the budget is per run, a dry run answers writes itself. The model is only
+  shown reads plus allowlisted writes. The transcript (report + every tool call, clamped to fit
+  256 KB) is sealed to the profile's public key with context `task-run|profileId|runId`. Email
+  delivery is `send_email` from the delivery account to its own address, issued by the server.
+- **Failures**: codes in `TaskRunner.Explain`; hard ones (`TaskStore.HardFailures`: sign-in rejected,
+  no or rejected key, account removed / no longer delegated / unreadable) pause the task at once,
+  others after three in a row. Logs carry the task id, outcome and counts, never prompts or results.
+- `ProfileMaintenance` refreshes delegated accounts untouched for 20 hours once a day, so a weekly
+  task still finds a live token, and deletes profiles idle for `PROFILE_IDLE_DAYS`.
 
 ## Tool scopes and read-only
 
@@ -836,6 +971,12 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 
 | Var | Default | Purpose |
 |---|---|---|
+| `BROWSER_ONLY_MODE` | `false` | `true` = no profiles, no tasks, nothing on disk |
+| `DATA_DIR` | `./data` (`/data` in the image) | server mode: the SQLite file; startup fails if not writable |
+| `DATA_KEY` / `DATA_KEY_PREVIOUS` | unset | server key (32 bytes, base64); unset = no delegation, no tasks. Malformed fails startup |
+| `PUBLIC_ORIGIN` | unset | passkey origin / RP id; unset = from the request (passkeys need a host name, not an IP) |
+| `PROFILE_MAIL_HOSTS`, `PROFILE_IDLE_DAYS` (180), `MAX_PROFILES` (1000) | | profile limits |
+| `TASKS_ENABLED` (true), `TASK_CONCURRENCY` (2), `TASK_TIMEOUT_MINUTES` (10), `TASK_MAX_TOOL_ROUNDS` (15), `TASK_MIN_INTERVAL_MINUTES` (15), `TASKS_PER_PROFILE` (10), `TASK_RUN_RETENTION` (50), `LLM_BASE_URL` | | scheduled tasks |
 | `PATH_BASE` | `/` | path prefix, e.g. `/mail-agent` when a reverse proxy serves it under one |
 | `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` / `-Proto` are believed. Unset = forwarded headers ignored; limits key off the TCP peer. A malformed entry fails startup |
 | `TRUST_CF_CONNECTING_IP` | `false` | key rate limits off `CF-Connecting-IP`, only when the TCP peer is a trusted proxy |
@@ -854,7 +995,10 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 | `RESUME_KEY_PREVIOUS` | unset | the key before a rotation; only opens bundles (invalid = ignored) |
 | `RESUME_DAYS` | `30` | how long one password sign-in can be remembered (capped at 60, SmarterMail's refresh-token lifetime) |
 
-`RESUME_KEY` is the service's one secret (it seals other people's refresh tokens): keep it in your
+Server-mode settings are read from `IConfiguration` (`ServerOptions`), so tests set them with
+`UseSetting`; a malformed value fails startup with its name.
+
+`RESUME_KEY` is the service's one secret in browser-only mode (`DATA_KEY` is the other in server mode) (it seals other people's refresh tokens): keep it in your
 secret store and pass it in through the environment, never in a file in this repo. Without it the service
 has no credentials of its own.
 
@@ -971,5 +1115,12 @@ reaches stdout.
   refresh); resume then fails and the user signs in again. On resume, accounts that fail are left
   out of the new bundle even when the failure was transient (only a resume where nothing came back
   keeps the old copy). Not yet checked against a live SmarterMail; exercised against a fake one.
+- Server mode is **single-replica**: SQLite, in-memory runtimes and an in-process scheduler.
+- Profiles need a passkey with the WebAuthn **PRF** extension; without it the browser falls back to
+  remember-me (when `RESUME_KEY` is set). Passkeys need HTTPS or `localhost`, never a bare IP.
+- Not yet checked against a live server: whether SmarterMail's `refresh-token` slides
+  `refreshTokenExpiration` (the daily keep-alive assumes it may), and the passkey flows in real
+  browsers with synced passkeys (the server side is tested with a software authenticator, the
+  browser crypto against a C#-sealed vector, the UI against the stub with a recovery code).
 - `wwwroot/dev/` (the frontend's stub server) is excluded from the published image by both the root
   `.dockerignore` and a `Content Remove` in the csproj, but still serves from a local `dotnet run`.

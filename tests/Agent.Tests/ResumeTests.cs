@@ -71,7 +71,8 @@ internal static class ResumeFixtures
     public static byte[] Key() => RandomNumberGenerator.GetBytes(32);
 
     public static Account NewAccount(SmarterMailAuth auth, string baseUrl = HostA, string login = "alice@example.com",
-        string refresh = "refresh-1", string clientId = "smartermail-agent-a", string? expiration = null)
+        string refresh = "refresh-1", string clientId = "smartermail-agent-a", string? expiration = null, bool readOnly = true,
+        string? id = null)
     {
         var tokenData = new TokenData
         {
@@ -84,11 +85,11 @@ internal static class ResumeFixtures
             RefreshExpiration = DateTime.UtcNow.AddDays(60).ToString("O"),
         };
         var globalContext = new GlobalContext(
-            Path.Combine(Path.GetTempPath(), $"sma-never-{Guid.NewGuid():N}.json"), readOnlyMode: true);
+            Path.Combine(Path.GetTempPath(), $"sma-never-{Guid.NewGuid():N}.json"), readOnlyMode: readOnly);
 
         return new Account
         {
-            Id = Account.NewId(),
+            Id = id ?? Account.NewId(),
             Role = login.Contains('@') ? AccountRole.User : AccountRole.SysAdmin,
             TokenData = tokenData,
             GlobalContext = globalContext,
@@ -98,7 +99,7 @@ internal static class ResumeFixtures
             EmailAddress = login,
             Domain = login.Contains('@') ? login.Split('@')[1] : string.Empty,
             BaseUrl = baseUrl,
-            ReadOnly = true,
+            ReadOnly = readOnly,
         };
     }
 

@@ -5,7 +5,12 @@ using Microsoft.AspNetCore.RateLimiting;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using SmarterMailAgent.Auth;
+using SmarterMailAgent.Llm;
 using SmarterMailAgent.Mcp;
+using SmarterMailAgent.Profiles;
+using SmarterMailAgent.Server;
+using SmarterMailAgent.Storage;
+using SmarterMailAgent.Tasks;
 using SmarterMailAgent.Web;
 using SmarterMailMcp.Core.Models;
 
@@ -23,7 +28,31 @@ builder.Services.AddSingleton(sp => ResumeSealer.FromEnvironment(
 builder.Services.AddSingleton<ToolCatalog>();
 builder.Services.AddSingleton<ToolInvoker>();
 builder.Services.AddSingleton<ToolDispatcher>();
+builder.Services.AddSingleton(sp => new AccountRestorer(
+    sp.GetRequiredService<SmarterMailAuth>(), sp.GetRequiredService<HostLoginThrottle>(),
+    sp.GetRequiredService<ILogger<AccountRestorer>>()));
 builder.Services.AddHostedService<SessionSweeper>();
+
+// Server mode (the default) keeps passkey-encrypted profiles and runs scheduled tasks;
+// BROWSER_ONLY_MODE=true registers none of it, so nothing is ever written to DATA_DIR.
+var serverOptions = ServerOptions.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(serverOptions);
+if (serverOptions.ServerMode)
+{
+    builder.Services.AddSingleton<DataStore>();
+    builder.Services.AddSingleton<ProfileStore>();
+    builder.Services.AddSingleton<ProfileRegistry>();
+    builder.Services.AddSingleton<PasskeyService>();
+    builder.Services.AddHostedService<ProfileMaintenance>();
+    if (serverOptions.TasksEnabled)
+    {
+        builder.Services.AddSingleton<TaskStore>();
+        builder.Services.AddHttpClient<OpenRouterClient>(http => http.Timeout = TimeSpan.FromMinutes(3));
+        builder.Services.AddSingleton<AgentLoop>();
+        builder.Services.AddSingleton<TaskRunner>();
+        builder.Services.AddTaskRunScheduler();
+    }
+}
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddControllers();
 
@@ -184,6 +213,26 @@ app.UseStaticFiles(new StaticFileOptions
                 ? "public, max-age=31536000, immutable"
                 : "no-cache",
 });
+// Browser-only mode: profile and task endpoints do not exist, whoever asks (ahead of authentication,
+// so an anonymous caller sees the same 404 as a signed-in one).
+if (serverOptions.BrowserOnly)
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api/profile") || context.Request.Path.StartsWithSegments("/api/tasks"))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            context.Response.Headers.CacheControl = "no-store";
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = "This server runs in browser-only mode: nothing is stored here.",
+                code = "SERVER_MODE_DISABLED",
+            });
+            return;
+        }
+        await next(context);
+    });
+}
 app.UseRateLimiter();
 app.UseAuthentication();
 // After authentication, so it can tell a cookie from a bearer: announces a newer resume bundle to
@@ -199,6 +248,9 @@ app.MapGet("/health", () => Results.Text("smartermail-agent ok"));
 // fails startup if any registered tool has no scope.
 var catalog = app.Services.GetRequiredService<ToolCatalog>();
 app.Services.GetRequiredService<ResumeSealer>();   // logs whether remember-me is on (never the key)
+ServerOptions.FromConfiguration(app.Configuration, app.Logger);   // logs the mode (never a key)
+if (serverOptions.ServerMode)
+    app.Services.GetRequiredService<DataStore>();   // opens / migrates the database, or fails startup
 var counts = catalog.Entries
     .GroupBy(e => e.Scope)
     .Select(g => $"{g.Key} {g.Count()} ({g.Count(e => !e.Write)} read)");

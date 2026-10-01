@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using SmarterMailAgent.Auth;
-using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailAgent.Controllers;
 
@@ -136,44 +135,22 @@ public sealed class ResumeController(
         }
 
         var payload = opened.Payload!;
-        var skipped = new List<SkippedAccount>();
-        var candidates = new List<(ResumeAccount Entry, string BaseUrl)>();
-
-        foreach (var (entry, index) in payload.Accounts.Select((e, i) => (e, i)))
-        {
-            if (index >= SessionStore.MaxAccounts)
-                skipped.Add(Skip(entry, "ACCOUNT_LIMIT"));
-            else if (ResumeSealer.RefreshExpired(entry))
-                skipped.Add(Skip(entry, "EXPIRED"));
-            else if (await HostGuard.ValidateAsync(entry.BaseUrl, ct) is { Ok: true, BaseUrl: { } baseUrl } &&
-                     string.Equals(baseUrl, entry.BaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
-                candidates.Add((entry, baseUrl));
-            else
-                skipped.Add(Skip(entry, "BLOCKED_HOST"));
-        }
+        var restorer = new AccountRestorer(SmarterMail, HostThrottle, logger);
+        var restored = await restorer.RestoreAsync(
+            payload.Accounts.Select(e => new AccountRestorer.Candidate(e)).ToList(), SessionStore.MaxAccounts,
+            throttledFailsAll: true, "Resume", ct);
 
         // A throttled server refuses the whole resume before anything is refreshed: no token has
         // rotated, so the browser keeps a bundle that still works once the server cools down.
-        foreach (var (_, baseUrl) in candidates)
-        {
-            if (HostThrottle.RetryAfter(baseUrl) is { } wait)
-                return HostThrottled(baseUrl, wait);
-        }
+        if (restored.Throttled is { } throttled)
+            return HostThrottled(throttled.BaseUrl, throttled.RetryAfter);
 
-        var refreshed = await Task.WhenAll(candidates.Select(c => RefreshAsync(c.Entry, c.BaseUrl, ct)));
-
-        var accounts = new List<Account>();
-        foreach (var (entry, baseUrl, tokenData, result) in refreshed)
-        {
-            if (result == RefreshResult.Refreshed)
-                accounts.Add(BuildAccount(new AuthOutcome.Success(tokenData, entry.Role), baseUrl, entry.ReadOnly));
-            else
-                skipped.Add(Skip(entry, result == RefreshResult.Rejected ? "REJECTED" : "UNAVAILABLE"));
-        }
+        var skipped = restored.Skipped.Select(s => Skip(s.Entry, s.Reason)).ToList();
+        var accounts = restored.Accounts.Select(r => r.Account).ToList();
 
         if (accounts.Count == 0)
         {
-            var unavailable = refreshed.Any(r => r.Result == RefreshResult.Unavailable);
+            var unavailable = restored.AnyUnavailable;
             logger.LogInformation("Resume failed: no account could be restored ({Count} in the bundle, unavailable={Unavailable}).",
                 payload.Accounts.Count, unavailable);
 
@@ -214,35 +191,6 @@ public sealed class ResumeController(
     }
 
     /// <summary>
-    /// One account's refresh, counted against its server like a sign-in: SmarterMail's intrusion
-    /// detection counts an invalid refresh token as a failed login from our IP.
-    /// </summary>
-    private async Task<(ResumeAccount Entry, string BaseUrl, TokenData TokenData, RefreshResult Result)> RefreshAsync(
-        ResumeAccount entry, string baseUrl, CancellationToken ct)
-    {
-        var tokenData = new TokenData
-        {
-            BaseUrl = baseUrl,
-            Username = entry.Login,
-            ReadOnlyMode = entry.ReadOnly,
-            Method = "simple",
-            UserType = entry.UserType ?? (entry.Role == AccountRole.SysAdmin ? "admin" : "user"),
-            ClientId = entry.ClientId,
-            RefreshToken = entry.RefreshToken,
-            RefreshExpiration = entry.RefreshExpiration,
-        };
-
-        using var attempt = HostThrottle.TryBegin(baseUrl, out _);
-        if (attempt is null)
-            return (entry, baseUrl, tokenData, RefreshResult.Unavailable);
-
-        var result = await SmarterMail.TryRefreshAsync(tokenData, ct);
-        attempt.Finish(failed: result == RefreshResult.Rejected);
-        logger.LogInformation("Resume refresh for host {Host}: {Result}.", baseUrl, result);
-        return (entry, baseUrl, tokenData, result);
-    }
-
-    /// <summary>
     /// Closes a live session on the incoming cookie. Accounts that share a clientId with the
     /// bundle are only forgotten: revoking them would revoke the pair this resume just minted
     /// (SmarterMail revokes per user and clientId). Anything else in it is revoked as on a login.
@@ -276,6 +224,17 @@ public sealed class ResumeController(
             {
                 error = "Remember-me is only available to the browser that holds the session cookie.",
                 code = "COOKIE_REQUIRED",
+            });
+        }
+
+        // A profile session is remembered by its profile (server mode); a browser bundle of the same
+        // accounts would rotate against the stored copy.
+        if (HttpContext.GetSession()?.Profile is not null)
+        {
+            return Conflict(new
+            {
+                error = "This chat is saved to a profile; sign in with your passkey on other devices.",
+                code = "PROFILE_SESSION",
             });
         }
 

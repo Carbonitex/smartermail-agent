@@ -8,6 +8,10 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <!-- Server mode only (BROWSER_ONLY_MODE unset): profiles, passkeys, scheduled tasks -->
+    <PackageReference Include="Cronos" />
+    <PackageReference Include="Fido2" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
 
   <ItemGroup>

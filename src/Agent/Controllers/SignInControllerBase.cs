@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using SmarterMailAgent.Auth;
-using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailAgent.Controllers;
 
@@ -25,17 +24,22 @@ public sealed record AccountResponse(
 /// <summary>Whether the session has a live MCP token. The token itself is only ever shown once.</summary>
 public sealed record McpTokenState(bool Active, DateTimeOffset? ExpiresAt);
 
+/// <summary>Server mode: the profile this session belongs to, and whether its accounts are unlocked.</summary>
+public sealed record ProfileState(string Id, bool Unlocked);
+
 /// <param name="Remembered">"Remember me on this device" is on: the browser keeps a resume bundle.</param>
+/// <param name="Profile">The session's profile (server mode); null for an ordinary session.</param>
 public sealed record SessionResponse(
     DateTimeOffset ExpiresAt, int MaxAccounts, IReadOnlyList<AccountResponse> Accounts, McpTokenState McpToken,
-    bool Remembered)
+    bool Remembered, ProfileState? Profile = null)
 {
     public static SessionResponse From(Session session) => new(
         session.ExpiresAt(SessionStore.MaxAge),
         SessionStore.MaxAccounts,
         session.Accounts.Select(AccountResponse.From).ToList(),
         session.McpTokenExpiresAt is { } expiresAt ? new(true, expiresAt) : new(false, null),
-        session.IsRemembered);
+        session.IsRemembered,
+        session.Profile is { } profile ? new ProfileState(profile.ProfileId, profile.IsUnlocked) : null);
 }
 
 /// <summary>
@@ -72,6 +76,9 @@ public abstract class SignInControllerBase(
         // Refuse before spending a SmarterMail login when there is no slot and nothing to replace.
         if (addTo is not null && addTo.IsFullFor(host.BaseUrl, request.Email, SessionStore.MaxAccounts))
             return LimitReached();
+
+        if (addTo is not null && ProfileRefusal(addTo, host.BaseUrl) is { } refusal)
+            return refusal;
 
         // Every visitor signs in from our one egress IP, and SmarterMail's IDS counts failures per
         // source IP: stop before a run of wrong passwords gets this service blocked on that server.
@@ -125,7 +132,11 @@ public abstract class SignInControllerBase(
     protected async Task<IActionResult> CompleteAsync(
         AuthOutcome.Success success, string baseUrl, bool readOnly, Session? addTo)
     {
-        var account = BuildAccount(success, baseUrl, readOnly);
+        // A profile keeps one row per login: signing in again reuses the row's id, which its
+        // scheduled tasks refer to.
+        var profile = addTo?.Profile;
+        var existingId = profile?.RowForLogin(baseUrl, success.TokenData.Username ?? string.Empty)?.Id;
+        var account = AccountBuilder.Build(auth, success, baseUrl, readOnly, existingId);
 
         logger.LogInformation("Login succeeded for host {Host} (readOnly={ReadOnly}, role={Role}).",
             baseUrl, readOnly, account.Role);
@@ -133,8 +144,14 @@ public abstract class SignInControllerBase(
         if (addTo is null)
             return await StartSessionAsync(account);
 
+        if (ProfileRefusal(addTo, account.BaseUrl) is { } refusal)
+        {
+            await account.DisposeAsync();
+            return refusal;
+        }
+
         var status = addTo.Add(account, SessionStore.MaxAccounts, out var replaced);
-        if (status == Session.AddStatus.LimitReached)
+        if (status == AccountSet.AddStatus.LimitReached)
         {
             await account.DisposeAsync();
             return LimitReached();
@@ -143,40 +160,22 @@ public abstract class SignInControllerBase(
         if (replaced is not null)
             await replaced.DisposeAsync();
 
+        if (profile is not null && !profile.Save(account))
+        {
+            logger.LogWarning("A new account could not be saved to its profile (locked).");
+            await addTo.AccountSet.Remove(account.Id)!.DisposeAsync();
+            return ProfileLocked();
+        }
+
         logger.LogInformation("Account {Change}. Accounts in session: {Count}",
-            status == Session.AddStatus.Replaced ? "replaced" : "added", addTo.Count);
+            status == AccountSet.AddStatus.Replaced ? "replaced" : "added", addTo.Count);
 
         return Ok(SessionResponse.From(addTo));
     }
 
     /// <summary>An in-memory account from a successful sign-in (or a resume's refresh).</summary>
-    protected Account BuildAccount(AuthOutcome.Success success, string baseUrl, bool readOnly)
-    {
-        var tokenData = success.TokenData;
-
-        // GlobalContext demands a token file path. Point it at a file inside the existing temp
-        // directory that is never created, never read and never written. Nothing appears on disk.
-        var globalContext = new GlobalContext(
-            Path.Combine(Path.GetTempPath(), $"sma-never-{Guid.NewGuid():N}.json"),
-            readOnlyMode: readOnly);
-
-        var userContext = UserContextFactory.Create(globalContext, tokenData);
-
-        return new Account
-        {
-            Id = Account.NewId(),
-            Role = success.Role,
-            TokenData = tokenData,
-            GlobalContext = globalContext,
-            UserContext = userContext,
-            Auth = auth,
-            Username = userContext.Username,
-            EmailAddress = tokenData.Username ?? string.Empty,
-            Domain = userContext.Domain,
-            BaseUrl = tokenData.BaseUrl ?? baseUrl.TrimEnd('/'),
-            ReadOnly = readOnly,
-        };
-    }
+    protected Account BuildAccount(AuthOutcome.Success success, string baseUrl, bool readOnly) =>
+        AccountBuilder.Build(auth, success, baseUrl, readOnly);
 
     /// <summary>
     /// Opens a new session with its first account. Any session already on the incoming cookie is
@@ -214,6 +213,36 @@ public abstract class SignInControllerBase(
             retryAfterSeconds = seconds,
         });
     }
+
+    /// <summary>
+    /// Why an account cannot join this profile session, or null: the profile must be unlocked (the
+    /// new account is sealed with its key) and the server must be on <c>PROFILE_MAIL_HOSTS</c>.
+    /// </summary>
+    private IActionResult? ProfileRefusal(Session session, string baseUrl)
+    {
+        if (session.Profile is not { } profile)
+            return null;
+        if (!profile.IsUnlocked)
+            return ProfileLocked();
+
+        var options = HttpContext.RequestServices.GetRequiredService<Server.ServerOptions>();
+        if (!options.AllowsProfileHost(baseUrl))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                error = "This server only keeps accounts from its own mail servers in profiles.",
+                code = "PROFILE_HOST_NOT_ALLOWED",
+            });
+        }
+
+        return null;
+    }
+
+    protected IActionResult ProfileLocked() => StatusCode(StatusCodes.Status409Conflict, new
+    {
+        error = "Unlock your profile with your passkey first.",
+        code = "PROFILE_LOCKED",
+    });
 
     protected IActionResult LimitReached() => StatusCode(StatusCodes.Status409Conflict, new
     {

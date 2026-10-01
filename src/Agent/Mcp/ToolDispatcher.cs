@@ -11,7 +11,8 @@ namespace SmarterMailAgent.Mcp;
 ///   <item>resolve the account from the <c>account</c> argument (<see cref="ToolPolicy.Resolve{T}"/>);</item>
 ///   <item>strip that argument, so the tool never sees it;</item>
 ///   <item>refuse a wrong role or a write on a read-only account;</item>
-///   <item>in a remembered session, refresh that account's token first if it is about to expire;</item>
+///   <item>for a scheduled task, apply its gate (allowlist, write budget, dry run);</item>
+///   <item>in a remembered or profile session (or a task), refresh that account's token first if it is about to expire;</item>
 ///   <item>invoke the tool on an <see cref="AccountServiceProvider"/> for that account;</item>
 ///   <item>retry once after an in-memory token refresh if SmarterMail answered 401.</item>
 /// </list>
@@ -29,6 +30,9 @@ public sealed class ToolDispatcher(
 
         /// <summary>A write tool on a read-only account.</summary>
         ReadOnly,
+
+        /// <summary>A scheduled task's gate refused the call (not on its allowlist, or over its write budget).</summary>
+        NotAllowed,
     }
 
     /// <param name="Account">The handle the call ran as; null when it failed before resolving one.</param>
@@ -36,10 +40,22 @@ public sealed class ToolDispatcher(
     {
         /// <summary>For the non-<see cref="Status.Ok"/> statuses: the message to hand back.</summary>
         public string Message => ToolInvoker.Flatten(Result);
+
+        /// <summary>A dry run answered this write itself; SmarterMail was never called.</summary>
+        public bool Simulated { get; init; }
     }
 
-    public async Task<Outcome> DispatchAsync(
+    /// <summary>A browser (or MCP-token) call, as the chat makes it.</summary>
+    public Task<Outcome> DispatchAsync(
         Session session,
+        string name,
+        IReadOnlyDictionary<string, JsonElement>? arguments,
+        IServiceProvider requestServices,
+        CancellationToken ct) =>
+        DispatchAsync(new SessionToolContext(session, store), name, arguments, requestServices, ct);
+
+    public async Task<Outcome> DispatchAsync(
+        IToolContext context,
         string name,
         IReadOnlyDictionary<string, JsonElement>? arguments,
         IServiceProvider requestServices,
@@ -50,7 +66,7 @@ public sealed class ToolDispatcher(
 
         var (requested, toolArguments) = SplitAccount(arguments);
 
-        switch (ToolPolicy.Resolve(name, entry.Scope, entry.Write, session.Accounts, requested))
+        switch (ToolPolicy.Resolve(name, entry.Scope, entry.Write, context.Accounts, requested))
         {
             case ToolPolicy.Resolution<Account>.Invalid invalid:
                 logger.LogInformation("Tool {Tool} refused: no usable account.", name);
@@ -61,7 +77,30 @@ public sealed class ToolDispatcher(
                 return Refuse(Status.ReadOnly, readOnly.Message);
 
             case ToolPolicy.Resolution<Account>.Ok ok:
-                if (session.IsRemembered && !await EnsureFreshAsync(session, ok.Account, ct))
+                if (entry.Write && context.Gate is { } gate)
+                {
+                    switch (gate.Admit(name))
+                    {
+                        case ToolGate.Decision.NotAllowed:
+                            logger.LogInformation("Task gate refused write tool {Tool}: not allowed.", name);
+                            return Refuse(Status.NotAllowed,
+                                $"'{name}' is not one of the changes this task may make. Do not retry it; " +
+                                "say in your summary that it would be needed.");
+                        case ToolGate.Decision.OverBudget:
+                            logger.LogInformation("Task gate refused write tool {Tool}: write budget spent.", name);
+                            return Refuse(Status.NotAllowed,
+                                $"This task may make at most {gate.MaxWrites} change(s) per run, and that budget is " +
+                                "spent. Make no further changes; list what is left in your summary.");
+                        case ToolGate.Decision.DryRun:
+                            logger.LogInformation("Dry run: write tool {Tool} simulated.", name);
+                            return new Outcome(Status.Ok, Simulated(name, ok.Account.Handle, toolArguments), ok.Account.Handle, TimeSpan.Zero)
+                            {
+                                Simulated = true,
+                            };
+                    }
+                }
+
+                if (context.RefreshesLazily && !await EnsureFreshAsync(context, ok.Account, ct))
                 {
                     return Refuse(Status.InvalidAccount,
                         $"SmarterMail no longer accepts the sign-in for account '{ok.Account.Handle}', so it was " +
@@ -74,20 +113,39 @@ public sealed class ToolDispatcher(
         }
     }
 
+    private static CallToolResult Simulated(string name, string handle, IReadOnlyDictionary<string, JsonElement>? arguments) =>
+        new()
+        {
+            Content =
+            [
+                new TextContentBlock
+                {
+                    Text = JsonSerializer.Serialize(new
+                    {
+                        dryRun = true,
+                        note = "Test run: nothing was changed. Carry on as if this call had succeeded.",
+                        wouldCall = name,
+                        account = handle,
+                        arguments,
+                    }),
+                },
+            ],
+        };
+
     /// <summary>
     /// The lazy refresh of a remembered session (the sweeper leaves those alone so the browser's
     /// bundle stays valid while it is away). False only when SmarterMail refused the refresh token:
     /// the account is dead and is dropped, as the sweeper drops one in an ordinary session. An
     /// unreachable server is not fatal here; the call goes ahead on the token it has.
     /// </summary>
-    private async Task<bool> EnsureFreshAsync(Session session, Account account, CancellationToken ct)
+    private async Task<bool> EnsureFreshAsync(IToolContext context, Account account, CancellationToken ct)
     {
         var result = await account.EnsureFreshAsync(ct);
         if (result != RefreshResult.Rejected)
             return true;
 
-        logger.LogWarning("Token refresh refused for an account ({Role}) in a remembered session; dropping it.", account.Role);
-        await store.RemoveAccountAsync(session, account.Id);
+        logger.LogWarning("Token refresh refused for an account ({Role}) refreshed per call; dropping it.", account.Role);
+        await context.OnRejectedAsync(account);
         return false;
     }
 
@@ -146,4 +204,66 @@ public sealed class ToolDispatcher(
     private static bool LooksUnauthorized(string content) =>
         content.Contains(nameof(HttpStatusCode.Unauthorized), StringComparison.OrdinalIgnoreCase) ||
         content.Contains("401", StringComparison.Ordinal);
+}
+
+/// <summary>What a tool call runs against: a browser session, or a scheduled task's run.</summary>
+public interface IToolContext
+{
+    IReadOnlyList<Account> Accounts { get; }
+
+    /// <summary>Refresh per call (lazily) rather than relying on the sweeper.</summary>
+    bool RefreshesLazily { get; }
+
+    /// <summary>SmarterMail refused this account's refresh token: it is dead.</summary>
+    Task OnRejectedAsync(Account account);
+
+    /// <summary>Extra limits on writes; null for a person at the keyboard.</summary>
+    ToolGate? Gate { get; }
+}
+
+/// <summary>A browser session as a tool context: a dead account leaves the session (or its profile marks it).</summary>
+public sealed class SessionToolContext(Session session, SessionStore store) : IToolContext
+{
+    public IReadOnlyList<Account> Accounts => session.Accounts;
+    public bool RefreshesLazily => session.RefreshesLazily;
+    public ToolGate? Gate => null;
+
+    public async Task OnRejectedAsync(Account account)
+    {
+        if (session.Profile is { } profile)
+            await profile.MarkRejectedAsync(account);
+        else
+            await store.RemoveAccountAsync(session, account.Id);
+    }
+}
+
+/// <summary>
+/// The limits a scheduled task puts on writes, enforced here and not only by the tool list the model
+/// was shown: an explicit allowlist of tool names, a budget per run, and dry-run (writes answered
+/// without calling SmarterMail).
+/// </summary>
+public sealed class ToolGate(IReadOnlySet<string> allowedWrites, int maxWrites, bool dryRun)
+{
+    private int _writes;
+
+    public enum Decision { Run, DryRun, NotAllowed, OverBudget }
+
+    public IReadOnlySet<string> AllowedWrites => allowedWrites;
+    public int MaxWrites => maxWrites;
+    public bool DryRunMode => dryRun;
+
+    /// <summary>Writes admitted so far (simulated ones included).</summary>
+    public int Writes => Volatile.Read(ref _writes);
+
+    public Decision Admit(string toolName)
+    {
+        if (!allowedWrites.Contains(toolName))
+            return Decision.NotAllowed;
+        if (Interlocked.Increment(ref _writes) > maxWrites)
+        {
+            Interlocked.Decrement(ref _writes);
+            return Decision.OverBudget;
+        }
+        return dryRun ? Decision.DryRun : Decision.Run;
+    }
 }
