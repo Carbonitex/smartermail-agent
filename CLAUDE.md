@@ -1118,8 +1118,9 @@ reaches stdout.
 - Server mode is **single-replica**: SQLite, in-memory runtimes and an in-process scheduler.
 - Profiles need a passkey with the WebAuthn **PRF** extension; without it the browser falls back to
   remember-me (when `RESUME_KEY` is set). Passkeys need HTTPS or `localhost`, never a bare IP.
-- Not yet checked against a live server: whether SmarterMail's `refresh-token` slides
-  `refreshTokenExpiration` (the daily keep-alive assumes it may), and the passkey flows in real
+- Checked against a live server (October 2026): `refresh-token` **slides** `refreshTokenExpiration`
+  (60 days from each refresh), rotates the refresh token, and refuses a replayed one, so the daily
+  keep-alive keeps delegated accounts alive indefinitely. Not yet checked: the passkey flows in real
   browsers with synced passkeys (the server side is tested with a software authenticator, the
   browser crypto against a C#-sealed vector, the UI against the stub with a recovery code).
 - `wwwroot/dev/` (the frontend's stub server) is excluded from the published image by both the root
