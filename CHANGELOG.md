@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0]
+
 ### Added
 
 - **smartermail-agent server mode**, now the default. A user can save the chat to a **profile** on
@@ -62,5 +64,6 @@ First public release.
 - A log-analysis harness for the admin server that runs in-process.
 - NuGet tool packages (`dnx`) and an MCP Registry listing.
 
-[Unreleased]: https://github.com/Carbonitex/smartermail-agent/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Carbonitex/smartermail-agent/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Carbonitex/smartermail-agent/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Carbonitex/smartermail-agent/releases/tag/v1.0.0
