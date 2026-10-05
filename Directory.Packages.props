@@ -7,21 +7,21 @@
   </PropertyGroup>
 
   <ItemGroup Label="MCP SDK">
-    <PackageVersion Include="ModelContextProtocol" Version="2.1.0" />
-    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.1.0" />
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
   </ItemGroup>
 
   <ItemGroup Label="Agent server mode">
     <PackageVersion Include="Cronos" Version="0.13.0" />
-    <PackageVersion Include="Fido2" Version="4.1.1" />
+    <PackageVersion Include="Fido2" Version="4.2.0" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup Label="Tests">
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.5" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
   </ItemGroup>
 
 </Project>
