@@ -910,8 +910,7 @@ public sealed class MailTools
                     }
             }
 
-            // Format the to address exactly like the working example: "name" <email>;
-            var toFormatted = $"\"{userContext.Username}\" <{to}>;";
+            var toFormatted = FormatAddressList(to);
 
             // Format HTML body with exact styling from working example
             var styledBody = $"<div fr-original-style=\"\" style=\"box-sizing: border-box; font-family: {composeFont}; font-size: {composeFontSize};\" dir=\"auto\">{body}</div>";
@@ -922,8 +921,8 @@ public sealed class MailTools
             var payload = new
             {
                 to = toFormatted,
-                cc = cc ?? "",
-                bcc = bcc ?? "",
+                cc = FormatAddressList(cc),
+                bcc = FormatAddressList(bcc),
                 ownerEmailAddress = userContext.EmailAddress,
                 folder = "drafts",
                 date = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
@@ -1169,8 +1168,7 @@ public sealed class MailTools
                     composeFontSize = fontSize.GetString() ?? "14px";
             }
 
-            // Format the to address
-            var toFormatted = $"\"{userContext.Username}\" <{to}>;";
+            var toFormatted = FormatAddressList(to);
 
             // Format HTML body
             var styledBody = $"<div fr-original-style=\"\" style=\"box-sizing: border-box; font-family: {composeFont}; font-size: {composeFontSize};\" dir=\"auto\">{body}</div>";
@@ -1178,8 +1176,8 @@ public sealed class MailTools
             var payload = new
             {
                 to = toFormatted,
-                cc = cc ?? "",
-                bcc = bcc ?? "",
+                cc = FormatAddressList(cc),
+                bcc = FormatAddressList(bcc),
                 ownerEmailAddress = userContext.EmailAddress,
                 folder = "drafts",
                 date = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
@@ -1649,8 +1647,7 @@ public sealed class MailTools
             to = await ExpandRecipientsAsync(to, userContext);
 
             // Format To addresses
-            var toFormatted = string.Join("; ",
-                to.Split(',').Select(t => t.Trim()).Where(t => !string.IsNullOrEmpty(t)).Select(t => $"<{t}>"));
+            var toFormatted = FormatAddressList(to);
 
             var bodyHtml = string.IsNullOrEmpty(message)
                 ? ""
@@ -1920,10 +1917,7 @@ public sealed class MailTools
             bcc = await ExpandRecipientsAsync(bcc ?? "", userContext);
 
             // Format To addresses
-            var toFormatted = string.IsNullOrWhiteSpace(to)
-                ? ""
-                : string.Join("; ",
-                    to.Split(',').Select(t => t.Trim()).Where(t => !string.IsNullOrEmpty(t)).Select(t => $"<{t}>"));
+            var toFormatted = FormatAddressList(to);
 
             var payload = new Dictionary<string, object>
             {
@@ -2199,6 +2193,15 @@ public sealed class MailTools
         var resolvedType = string.IsNullOrEmpty(contentType) ? fetchedType : contentType;
         return (Encoding.UTF8.GetString(data), null, resolvedType);
     }
+
+    /// <summary>
+    /// "a@x.com, Name &lt;b@y.com&gt;" → "&lt;a@x.com&gt;; Name &lt;b@y.com&gt;": one entry per recipient, as
+    /// SmarterMail's compose expects. A recipient that already has angle brackets is kept as written.
+    /// </summary>
+    public static string FormatAddressList(string? recipients) =>
+        string.Join("; ", (recipients ?? "")
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(t => t.Contains('<') ? t : $"<{t}>"));
 
     /// <summary>
     /// SmarterMail's attachment entries carry no MIME type, so take it from the file name (an explicit

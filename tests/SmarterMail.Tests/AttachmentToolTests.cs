@@ -216,3 +216,16 @@ public sealed class AttachmentToolTests : IDisposable
         Assert.Equal("hello", await File.ReadAllTextAsync(Path.Combine(_dir, "attachment.txt")));
     }
 }
+
+/// <summary>Recipients are sent to SmarterMail one entry each, not wrapped in a single display name.</summary>
+public sealed class AddressListTests
+{
+    [Theory]
+    [InlineData("a@x.com", "<a@x.com>")]
+    [InlineData("a@x.com, b@y.com,c@z.com", "<a@x.com>; <b@y.com>; <c@z.com>")]
+    [InlineData("a@x.com; Bee <b@y.com>", "<a@x.com>; Bee <b@y.com>")]
+    [InlineData(" , ", "")]
+    [InlineData(null, "")]
+    public void Each_recipient_is_its_own_entry(string? input, string expected) =>
+        Assert.Equal(expected, MailTools.FormatAddressList(input));
+}

@@ -31,6 +31,8 @@ All notable changes to this project are documented here. The format follows
   the server's own files, reachable by any signed-in user, or by an email crafted to steer the model.
   `download_email_attachment` is a read tool, so this even worked on read-only accounts. Paths
   now work only where `SMARTERMAIL_LOCAL_FILES` is on, and never in smartermail-agent.
+- `send_email` and `send_email_with_attachments` sent all recipients as one entry under the sender's
+  name (`"user" <a, b>`); each To / CC / BCC recipient is now its own entry.
 - Inline image uploads returned `cid:cidgenerate` instead of the content ID SmarterMail assigned, so
   the image did not show.
 - Failed uploads report SmarterMail's message (e.g. "Invalid content ID") instead of only the
