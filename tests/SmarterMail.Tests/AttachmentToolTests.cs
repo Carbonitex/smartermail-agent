@@ -85,6 +85,19 @@ public sealed class AttachmentToolTests : IDisposable
     }
 
     [Fact]
+    public async Task Files_over_one_chunk_upload_when_SmarterMail_answers_chunks_with_an_empty_body()
+    {
+        using var server = Server(path => path == "/api/upload" ? (200, "") : (404, "{}"));
+        var (user, global) = Connect(server);
+        var text = new string('x', 3 * 1024 * 1024);   // two 2 MB chunks
+
+        var result = Json(await MailTools.UploadAttachment(fileName: "big.txt", text: text, userContext: user, globalContext: global));
+
+        Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
+        Assert.Equal(2, server.Requests.Count(r => r.Path == "/api/upload"));
+    }
+
+    [Fact]
     public async Task A_file_path_is_refused_without_local_file_access_and_the_file_is_never_read()
     {
         var secret = Path.Combine(_dir, "secret.txt");

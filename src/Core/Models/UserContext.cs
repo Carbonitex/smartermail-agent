@@ -431,7 +431,9 @@ public class UserContext : IDisposable, IAsyncDisposable
                 endpoint);
         }
 
-        return await response.Content.ReadFromJsonAsync<T>();
+        // SmarterMail's resumable /api/upload answers every chunk but the last with an empty body.
+        var body = await response.Content.ReadAsStringAsync();
+        return string.IsNullOrWhiteSpace(body) ? default : JsonSerializer.Deserialize<T>(body, JsonSerializerOptions.Web);
     }
 
     public async Task<JsonElement> GetUserInfoAsync()

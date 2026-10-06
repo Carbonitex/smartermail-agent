@@ -35,6 +35,8 @@ All notable changes to this project are documented here. The format follows
   name (`"user" <a, b>`); each To / CC / BCC recipient is now its own entry.
 - Inline image uploads returned `cid:cidgenerate` instead of the content ID SmarterMail assigned, so
   the image did not show.
+- Attachments larger than one 2 MB upload chunk failed ("The input does not contain any JSON
+  tokens"): SmarterMail answers intermediate chunks with an empty body.
 - Failed uploads report SmarterMail's message (e.g. "Invalid content ID") instead of only the
   status code.
 - `get_email_attachments` reported every attachment as not inline, with no content type, index 0.
