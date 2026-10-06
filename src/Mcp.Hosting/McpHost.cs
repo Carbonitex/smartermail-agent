@@ -40,9 +40,13 @@ public static class McpHost
 
         var version = Version;
         Console.Error.WriteLine($"{definition.ServerName} {version} ({settings.Transport.ToString().ToLowerInvariant()}, " +
-                                $"{(settings.ReadOnly ? "read-only" : "read-write")})");
+                                $"{(settings.ReadOnly ? "read-only" : "read-write")}" +
+                                $"{(settings.LocalFiles ? ", local files" : "")})");
 
-        var globalContext = new GlobalContext(settings.TokenFile, readOnlyMode: settings.ReadOnly);
+        var globalContext = new GlobalContext(settings.TokenFile, readOnlyMode: settings.ReadOnly)
+        {
+            LocalFileAccess = settings.LocalFiles,
+        };
         var authService = new SmAuthService(globalContext);
 
         Console.Error.WriteLine($"Authenticating with SmarterMail at {settings.SmarterMailUrl} as {settings.Username} ({definition.UserType})...");
@@ -63,6 +67,7 @@ public static class McpHost
         // Remove the transport switch so the configuration binder never sees it.
         var hostArgs = args.Where(a => !a.Equals(McpHostSettings.StdioArgument, StringComparison.OrdinalIgnoreCase)).ToArray();
         var serverInfo = new Implementation { Name = definition.ServerName, Version = version };
+        var instructions = definition.Instructions?.Invoke(settings);
 
         if (settings.Transport == McpTransport.Stdio)
         {
@@ -72,7 +77,7 @@ public static class McpHost
             builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
             AddContexts(builder.Services, globalContext, userContext, authService);
 
-            var mcp = builder.Services.AddMcpServer(o => o.ServerInfo = serverInfo).WithStdioServerTransport();
+            var mcp = builder.Services.AddMcpServer(o => { o.ServerInfo = serverInfo; o.ServerInstructions = instructions; }).WithStdioServerTransport();
             await addPrimitives(userContext, mcp);
             mcp.WithReadOnlyFilter(settings.ReadOnly);
 
@@ -96,13 +101,15 @@ public static class McpHost
             // - initialize 2025-11-25 (Cursor Streamable HTTP) echoes that version over SSE
             // - 2026-07-28 is JSON-only: server/discover + per-request params._meta (no initialize, no sessions)
             // - GET/DELETE /mcp return 405 (no SSE GET stream). Never default initialize to 2026-07-28.
-            var mcp = builder.Services.AddMcpServer(o => o.ServerInfo = serverInfo)
+            var mcp = builder.Services.AddMcpServer(o => { o.ServerInfo = serverInfo; o.ServerInstructions = instructions; })
                 .WithHttpTransport(options => options.Stateless = true);
             await addPrimitives(userContext, mcp);
             mcp.WithReadOnlyFilter(settings.ReadOnly);
 
             var app = builder.Build();
             app.MapMcp("/mcp").RequireAuthorization("ApiAccess");
+            if (definition.MapHttpEndpoints is { } mapEndpoints)
+                mapEndpoints(app.MapGroup("").RequireAuthorization("ApiAccess"), userContext);
             app.MapGet("/health", () => Results.Text($"{definition.ServerName} {version} ok")).AllowAnonymous();   // liveness only
             await app.RunAsync();
             return 0;

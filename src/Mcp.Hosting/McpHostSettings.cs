@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Routing;
+using SmarterMailMcp.Core.Models;
+
 namespace SmarterMailMcp.Hosting;
 
 public enum McpTransport
@@ -23,6 +26,15 @@ public sealed class McpHostDefinition
 
     /// <summary>Token file used when <c>SMARTERMAIL_TOKEN_FILE</c> is unset.</summary>
     public required string DefaultTokenFile { get; init; }
+
+    /// <summary>
+    /// Extra HTTP endpoints next to <c>/mcp</c> (HTTP transport only). Each is mapped by the host
+    /// behind the same API key as <c>/mcp</c>, so a mapper only adds routes.
+    /// </summary>
+    public Action<IEndpointRouteBuilder, UserContext>? MapHttpEndpoints { get; init; }
+
+    /// <summary>MCP <c>instructions</c> sent to clients at initialize, or null for none.</summary>
+    public Func<McpHostSettings, string?>? Instructions { get; init; }
 }
 
 /// <summary>
@@ -36,7 +48,8 @@ public sealed record McpHostSettings(
     string Password,
     bool ReadOnly,
     string TokenFile,
-    string? ApiKey)
+    string? ApiKey,
+    bool LocalFiles = false)
 {
     public const string TransportVariable = "MCP_TRANSPORT";
     public const string StdioArgument = "--stdio";
@@ -44,6 +57,7 @@ public sealed record McpHostSettings(
     public const string ReadOnlyVariable = "SMARTERMAIL_READ_ONLY";
     public const string TokenFileVariable = "SMARTERMAIL_TOKEN_FILE";
     public const string ApiKeyVariable = "API_KEY";
+    public const string LocalFilesVariable = "SMARTERMAIL_LOCAL_FILES";
 
     /// <summary>Parses the settings, or returns every problem found.</summary>
     public static (McpHostSettings? Settings, IReadOnlyList<string> Errors) Parse(
@@ -83,6 +97,17 @@ public sealed record McpHostSettings(
             errors.Add($"{ApiKeyVariable} is required for the HTTP transport (generate one with: openssl rand -hex 32). " +
                        $"For a local client that launches the server itself, use {StdioArgument} instead.");
 
+        // Tools may touch this process's filesystem only where the caller shares it: a stdio server the
+        // client launched. Over HTTP the caller is elsewhere, so a path would name the server's files.
+        var localFiles = transport == McpTransport.Stdio;
+        var localFilesValue = env(LocalFilesVariable)?.Trim().ToLowerInvariant();
+        if (localFilesValue is "true" or "1" or "yes")
+            localFiles = true;
+        else if (localFilesValue is "false" or "0" or "no")
+            localFiles = false;
+        else if (localFilesValue is not (null or ""))
+            errors.Add($"{LocalFilesVariable}='{localFilesValue}' is not true|false.");
+
         var tokenFile = env(TokenFileVariable);
         if (string.IsNullOrWhiteSpace(tokenFile))
             tokenFile = definition.DefaultTokenFile;
@@ -91,6 +116,6 @@ public sealed record McpHostSettings(
             return (null, errors);
 
         return (new McpHostSettings(transport, url!.Trim(), user!.Trim(), password!, readOnly, tokenFile,
-            string.IsNullOrWhiteSpace(apiKey) ? null : apiKey), errors);
+            string.IsNullOrWhiteSpace(apiKey) ? null : apiKey, localFiles), errors);
     }
 }

@@ -966,16 +966,36 @@ public sealed class MailTools
         }
     }
 
+    /// <summary>Largest attachment accepted through a tool argument (decoded size).</summary>
+    internal const int MaxAttachmentArgumentBytes = 25 * 1024 * 1024;
+
+    /// <summary>Largest attachment download_email_attachment returns as base64.</summary>
+    internal const int MaxAttachmentResultBytes = 5 * 1024 * 1024;
+
     [McpServerTool]
-    [Description("Upload a file attachment for use in composing emails. Returns an attachmentGuid that can be used with send_email_with_attachments.")]
+    [Description("Upload a file to attach to an email, then send it with send_email_with_attachments using the returned attachmentGuid. " +
+                 "Give the file as exactly one of: base64Content (any file, base64-encoded), text (a text file's contents, e.g. .txt/.csv/.ics/.html) " +
+                 "or filePath (only on a local server that shares your filesystem). " +
+                 "For an image shown inside the HTML body, set inline=true and use the returned htmlReference as the src: <img src=\"cid:...\">. " +
+                 "SmarterMail assigns the content ID, so always use the returned value. " +
+                 "Several files go in one email by passing the first call's attachmentGuid to the next calls.")]
     public static async Task<string> UploadAttachment(
-        [Description("The full local file path to upload (e.g., /path/to/file.png)")]
-        string filePath,
-        [Description("Optional: An existing attachment GUID to add more files to. If not provided, a new GUID will be generated.")]
+        [Description("The attachment's file name, e.g. report.pdf or banner.png. Required with base64Content or text; the extension sets the content type unless contentType is given.")]
+        string fileName = "",
+        [Description("The file's bytes, base64-encoded (a data: URL is accepted too).")]
+        string base64Content = "",
+        [Description("The file's contents as text (sent as UTF-8). Use for text files instead of base64Content.")]
+        string text = "",
+        [Description("Path to a file on the MCP server's own filesystem. Only works when the server shares your filesystem (a local stdio server); otherwise use base64Content or text.")]
+        string filePath = "",
+        [Description("Optional MIME type, e.g. image/png. Defaults from the file name's extension.")]
+        string contentType = "",
+        [Description("true to embed the file (an image) in the HTML body via cid: instead of attaching it. The result's htmlReference is the src to use.")]
+        bool inline = false,
+        [Description("Optional: the attachmentGuid from an earlier upload_attachment call, to add this file to the same email.")]
         string attachmentGuid = "",
-        [Description("Optional: Content-ID for inline/embedded images. Use this ID in HTML as src=\"cid:yourContentId\". If not provided, the image will be a regular attachment.")]
-        string contentId = "",
-        UserContext userContext = null!)
+        UserContext userContext = null!,
+        GlobalContext globalContext = null!)
     {
         if (userContext.ReadOnlyMode)
             return JsonSerializer.Serialize(new
@@ -983,58 +1003,126 @@ public sealed class MailTools
 
         try
         {
-            // Use UploadService for the upload
-            var result = await UploadService.UploadAttachmentAsync(
-                userContext,
-                filePath,
-                string.IsNullOrEmpty(attachmentGuid) ? null : attachmentGuid,
-                string.IsNullOrEmpty(contentId) ? null : contentId);
+            if (!string.IsNullOrWhiteSpace(attachmentGuid) && !Guid.TryParse(attachmentGuid, out _))
+                return JsonSerializer.Serialize(new { success = false, error = $"attachmentGuid '{attachmentGuid}' is not a GUID. Use the attachmentGuid an earlier upload_attachment call returned, or omit it." });
+            var guid = string.IsNullOrWhiteSpace(attachmentGuid) ? null : attachmentGuid.Trim();
 
-            if (!result.Success)
+            var sources = new[] { base64Content, text, filePath }.Count(v => !string.IsNullOrEmpty(v));
+            if (sources != 1)
+                return JsonSerializer.Serialize(new { success = false, error = sources == 0
+                    ? "Give the file as one of base64Content, text or filePath."
+                    : "Give only one of base64Content, text or filePath." });
+
+            UploadService.UploadResult result;
+            if (!string.IsNullOrEmpty(filePath))
             {
-                return JsonSerializer.Serialize(new { success = false, error = result.Error });
+                if (!globalContext.LocalFileAccess)
+                    return JsonSerializer.Serialize(new { success = false, error =
+                        "This MCP server does not read files from its filesystem: it is not running on your machine, so a path names its files, not yours. " +
+                        "Send the file's bytes as base64Content (or its contents as text) with a fileName instead." });
+
+                result = await UploadService.UploadAttachmentAsync(userContext, filePath, guid, inline);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(fileName))
+                    return JsonSerializer.Serialize(new { success = false, error = "fileName is required with base64Content or text, e.g. banner.png." });
+                fileName = Path.GetFileName(fileName.Trim());
+
+                byte[] bytes;
+                if (!string.IsNullOrEmpty(text))
+                {
+                    bytes = Encoding.UTF8.GetBytes(text);
+                }
+                else
+                {
+                    var (decoded, dataUrlType, decodeError) = DecodeBase64Content(base64Content);
+                    if (decoded is null)
+                        return JsonSerializer.Serialize(new { success = false, error = decodeError });
+                    bytes = decoded;
+                    if (string.IsNullOrWhiteSpace(contentType) && dataUrlType is not null)
+                        contentType = dataUrlType;
+                }
+
+                if (bytes.Length > MaxAttachmentArgumentBytes)
+                    return JsonSerializer.Serialize(new { success = false, error = $"The file is {bytes.Length / 1024.0 / 1024.0:F1} MB; the limit for a tool argument is {MaxAttachmentArgumentBytes / 1024 / 1024} MB." });
+
+                result = await UploadService.UploadAttachmentAsync(userContext, bytes, fileName,
+                    string.IsNullOrWhiteSpace(contentType) ? null : contentType.Trim(), guid, inline);
             }
 
-            var response = new Dictionary<string, object>
-            {
-                { "success", true },
-                { "attachmentGuid", result.Guid! },
-                { "fileName", result.FileName! },
-                { "fileSize", result.FileSize },
-                { "contentType", result.ContentType! },
-                { "uploadResult", result.ServerResponse! }
-            };
-
-            // Include contentId info - use the actual returned contentId (may differ if "cidgenerate" was used)
-            var actualContentId = result.ContentId ?? contentId;
-            if (!string.IsNullOrEmpty(actualContentId))
-            {
-                response["contentId"] = actualContentId;
-                response["htmlReference"] = $"cid:{actualContentId}";
-            }
-
-            return JsonSerializer.Serialize(response);
-        }
-        catch (SmarterMailApiException apiEx)
-        {
-            return JsonSerializer.Serialize(new { success = false, error = apiEx.Message, statusCode = (int)apiEx.StatusCode, apiError = apiEx.ResponseBody, endpoint = apiEx.Endpoint });
+            return UploadResultJson(result, inline);
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { success = false, error = ex.Message });
+            return JsonSerializer.Serialize(new { success = false, error = UploadService.DescribeError(ex) });
         }
     }
 
+    /// <summary>The tool result for an upload; shared with hosts that accept uploads over plain HTTP.</summary>
+    public static string UploadResultJson(UploadService.UploadResult result, bool inline)
+    {
+        if (!result.Success)
+            return JsonSerializer.Serialize(new { success = false, error = result.Error });
+
+        var response = new Dictionary<string, object?>
+        {
+            ["success"] = true,
+            ["attachmentGuid"] = result.Guid,
+            ["fileName"] = result.FileName,
+            ["fileSize"] = result.FileSize,
+            ["contentType"] = result.ContentType,
+            ["inline"] = inline,
+        };
+        if (inline)
+        {
+            response["contentId"] = result.ContentId;
+            response["htmlReference"] = $"cid:{result.ContentId}";
+            response["next"] = $"Put <img src=\"cid:{result.ContentId}\"> in the HTML body and send with send_email_with_attachments, attachmentGuid {result.Guid}.";
+        }
+        else
+        {
+            response["next"] = $"Send with send_email_with_attachments, attachmentGuid {result.Guid}.";
+        }
+        return JsonSerializer.Serialize(response);
+    }
+
+    /// <summary>Base64 or a <c>data:[type];base64,</c> URL → bytes (and the URL's type).</summary>
+    public static (byte[]? Bytes, string? DataUrlType, string? Error) DecodeBase64Content(string value)
+    {
+        value = value.Trim();
+        string? dataUrlType = null;
+        if (value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            var comma = value.IndexOf(',');
+            if (comma < 0 || !value[..comma].EndsWith(";base64", StringComparison.OrdinalIgnoreCase))
+                return (null, null, "base64Content is a data: URL without ';base64,'.");
+            var type = value[5..comma][..^";base64".Length];
+            dataUrlType = type.Length > 0 ? type : null;
+            value = value[(comma + 1)..];
+        }
+
+        // Accept URL-safe base64 and missing padding as well.
+        value = value.Replace('-', '+').Replace('_', '/');
+        value = string.Concat(value.Where(c => !char.IsWhiteSpace(c)));
+        if (value.Length % 4 != 0)
+            value = value.PadRight(value.Length + (4 - value.Length % 4), '=');
+
+        try { return (Convert.FromBase64String(value), dataUrlType, null); }
+        catch (FormatException) { return (null, null, "base64Content is not valid base64."); }
+    }
+
     [McpServerTool]
-    [Description("Send an email with previously uploaded attachments. Use upload_attachment first to upload files, then use the returned attachmentGuid here.")]
+    [Description("Send an email with previously uploaded attachments. Use upload_attachment first, then pass its attachmentGuid here. " +
+                 "Inline images uploaded with inline=true are shown where the body has <img src=\"cid:...\"> with their htmlReference.")]
     public static async Task<string> SendEmailWithAttachments(
         [Description("The email addresses to send the email to, separated by commas")]
         string to,
         [Description("The subject of the email")]
         string subject,
-        [Description("The body of the email (HTML supported)")]
+        [Description("The body of the email (HTML supported; reference inline images as <img src=\"cid:...\">)")]
         string body,
-        [Description("The attachment GUID from upload_attachment tool")]
+        [Description("The attachmentGuid returned by upload_attachment")]
         string attachmentGuid,
         [Description("The email address to cc")]
         string cc = "",
@@ -1604,7 +1692,8 @@ public sealed class MailTools
     }
 
     [McpServerTool(ReadOnly = true)]
-    [Description("Get attachments from an email message")]
+    [Description("List an email's attachments: filename, contentType (from the file name), approximate size (SmarterMail rounds to KB) and the content IDs of images embedded inline in the body. " +
+                 "Read a text attachment with read_email_part; download_email_attachment fetches any of them.")]
     public static async Task<string> GetEmailAttachments(
         [Description("The UID of the email")]
         int uid,
@@ -1636,22 +1725,28 @@ public sealed class MailTools
             if (!response.TryGetProperty("messageData", out var messageData))
                 return JsonSerializer.Serialize(new { success = false, error = $"Email not found for UID {uid} in folder '{folderId}'. Verify the UID and folderId are correct. Use get_emails to find valid UIDs." });
 
+            // SmarterMail lists each part as {filename, type: image|document, partID, size (KB-rounded),
+            // link}; inline images appear there too, and their content IDs only in originalCidLinks.
             var attachments = new List<object>();
-            if (messageData.TryGetProperty("attachments", out var attachmentsArray))
+            if (messageData.TryGetProperty("attachments", out var attachmentsArray) && attachmentsArray.ValueKind == JsonValueKind.Array)
             {
                 foreach (var att in attachmentsArray.EnumerateArray())
                 {
+                    var filename = att.TryGetProperty("filename", out var fn) ? fn.GetString() : null;
                     attachments.Add(new
                     {
-                        filename = att.TryGetProperty("filename", out var fn) ? fn.GetString() : null,
-                        size = att.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0,
-                        contentType = att.TryGetProperty("contentType", out var ct) ? ct.GetString() : null,
-                        contentId = att.TryGetProperty("contentId", out var cid) ? cid.GetString() : null,
-                        isInline = att.TryGetProperty("isInline", out var inline) && inline.GetBoolean(),
-                        index = att.TryGetProperty("index", out var idx) ? idx.GetInt32() : 0
+                        filename,
+                        contentType = AttachmentContentType(att, filename),
+                        type = att.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null,
+                        approximateSize = att.TryGetProperty("size", out var sz) && sz.ValueKind == JsonValueKind.Number ? sz.GetInt64() : 0,
+                        partId = att.TryGetProperty("partID", out var pid) && pid.ValueKind == JsonValueKind.Number ? pid.GetInt32() : (int?)null,
                     });
                 }
             }
+
+            var inlineContentIds = new List<string>();
+            if (messageData.TryGetProperty("originalCidLinks", out var cidLinks) && cidLinks.ValueKind == JsonValueKind.Object)
+                inlineContentIds.AddRange(cidLinks.EnumerateObject().Select(p => p.Name));
 
             return JsonSerializer.Serialize(new
             {
@@ -1659,7 +1754,8 @@ public sealed class MailTools
                 uid,
                 folderId,
                 attachmentCount = attachments.Count,
-                attachments
+                attachments,
+                inlineContentIds
             });
         }
         catch (SmarterMailApiException apiEx)
@@ -1673,7 +1769,8 @@ public sealed class MailTools
     }
 
     [McpServerTool(ReadOnly = true)]
-    [Description("Download an email attachment and save it to a local file path. Use get_email_attachments first to get the list of attachment filenames.")]
+    [Description("Fetch an email attachment (filenames from get_email_attachments). Text attachments come back as text; " +
+                 "binary ones as base64 when includeBase64=true (up to 5 MB). On a local server that shares your filesystem, savePath writes the file there instead.")]
     public static async Task<string> DownloadEmailAttachment(
         [Description("The UID of the email")]
         int uid,
@@ -1681,10 +1778,18 @@ public sealed class MailTools
         string folderId,
         [Description("The filename of the attachment to download (from get_email_attachments)")]
         string filename,
-        [Description("The local file path to save the attachment to. If a directory is provided, the attachment filename will be appended.")]
-        string savePath,
-        UserContext userContext = null!)
+        [Description("Optional: save to this path on the MCP server's filesystem (a directory gets the attachment's filename). Only works on a local server that shares your filesystem.")]
+        string savePath = "",
+        [Description("Return a binary attachment's bytes as base64Content (up to 5 MB). Text attachments are always returned as text.")]
+        bool includeBase64 = false,
+        UserContext userContext = null!,
+        GlobalContext globalContext = null!)
     {
+        if (!string.IsNullOrWhiteSpace(savePath) && !globalContext.LocalFileAccess)
+            return JsonSerializer.Serialize(new { success = false, error =
+                "This MCP server does not write files to its filesystem: it is not running on your machine. " +
+                "Omit savePath to get the attachment back as text (or base64 with includeBase64=true)." });
+
         try
         {
             var folderPath =
@@ -1713,6 +1818,7 @@ public sealed class MailTools
             // Find the matching attachment by filename
             string? downloadLink = null;
             string? actualFilename = filename;
+            string? listedType = null;
             if (messageData.TryGetProperty("attachments", out var attachments))
             {
                 foreach (var att in attachments.EnumerateArray())
@@ -1721,6 +1827,8 @@ public sealed class MailTools
                     if (string.Equals(attFilename, filename, StringComparison.OrdinalIgnoreCase))
                     {
                         downloadLink = att.TryGetProperty("link", out var link) ? link.GetString() : null;
+                        actualFilename = attFilename ?? filename;
+                        listedType = AttachmentContentType(att, actualFilename);
                         break;
                     }
                 }
@@ -1728,6 +1836,21 @@ public sealed class MailTools
 
             if (string.IsNullOrEmpty(downloadLink))
                 return JsonSerializer.Serialize(new { success = false, error = $"Attachment '{filename}' not found in email UID {uid}. Use get_email_attachments to see available attachment filenames." });
+
+            if (string.IsNullOrWhiteSpace(savePath))
+            {
+                var (bytes, fetchedType) = await userContext.GetBytesAsync(downloadLink);
+                var type = listedType is null or "application/octet-stream" ? fetchedType ?? listedType : listedType;
+                if (IsTextDecodableAttachment(type, actualFilename))
+                    return JsonSerializer.Serialize(new { success = true, filename = actualFilename, size = bytes.Length, contentType = type, text = Encoding.UTF8.GetString(bytes) });
+                if (!includeBase64)
+                    return JsonSerializer.Serialize(new { success = true, filename = actualFilename, size = bytes.Length, contentType = type,
+                        note = "Binary attachment: content not included. Call again with includeBase64=true to get it as base64Content." });
+                if (bytes.Length > MaxAttachmentResultBytes)
+                    return JsonSerializer.Serialize(new { success = false, filename = actualFilename, size = bytes.Length, contentType = type,
+                        error = $"The attachment is {bytes.Length / 1024.0 / 1024.0:F1} MB; base64 results are limited to {MaxAttachmentResultBytes / 1024 / 1024} MB." });
+                return JsonSerializer.Serialize(new { success = true, filename = actualFilename, size = bytes.Length, contentType = type, base64Content = Convert.ToBase64String(bytes) });
+            }
 
             // If savePath is a directory, append the filename
             if (Directory.Exists(savePath))
@@ -1983,7 +2106,7 @@ public sealed class MailTools
             foreach (var att in attachments.EnumerateArray())
             {
                 var filename = att.TryGetProperty("filename", out var fn) ? fn.GetString() : null;
-                var contentType = att.TryGetProperty("contentType", out var ct) ? ct.GetString() : null;
+                var contentType = AttachmentContentType(att, filename);
                 var size = att.TryGetProperty("size", out var sz) && sz.ValueKind == JsonValueKind.Number
                     ? sz.GetInt64()
                     : 0L;
@@ -2057,7 +2180,7 @@ public sealed class MailTools
                 continue;
 
             downloadLink = att.TryGetProperty("link", out var link) ? link.GetString() : null;
-            contentType = att.TryGetProperty("contentType", out var ct) ? ct.GetString() : null;
+            contentType = AttachmentContentType(att, attFilename);
             actualFilename = attFilename;
             break;
         }
@@ -2068,13 +2191,24 @@ public sealed class MailTools
         if (!IsTextDecodableAttachment(contentType, actualFilename))
         {
             return (null,
-                $"Attachment '{actualFilename}' is binary ({contentType ?? "unknown type"}). Use download_email_attachment to save it.",
+                $"Attachment '{actualFilename}' is binary ({contentType ?? "unknown type"}). Use download_email_attachment to fetch it.",
                 contentType);
         }
 
         var (data, fetchedType) = await userContext.GetBytesAsync(downloadLink);
         var resolvedType = string.IsNullOrEmpty(contentType) ? fetchedType : contentType;
         return (Encoding.UTF8.GetString(data), null, resolvedType);
+    }
+
+    /// <summary>
+    /// SmarterMail's attachment entries carry no MIME type, so take it from the file name (an explicit
+    /// <c>contentType</c>, should one ever appear, wins).
+    /// </summary>
+    private static string? AttachmentContentType(JsonElement att, string? filename)
+    {
+        if (att.TryGetProperty("contentType", out var ct) && ct.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(ct.GetString()))
+            return ct.GetString();
+        return string.IsNullOrEmpty(filename) ? null : UploadService.GetContentType(filename);
     }
 
     private static bool IsTextDecodableAttachment(string? contentType, string? filename)

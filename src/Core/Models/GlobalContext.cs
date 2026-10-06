@@ -8,6 +8,14 @@ public class GlobalContext
     public bool ReadOnlyModeEnforced { get; set; } = true;
 
     /// <summary>
+    /// Whether tools may read and write this process's filesystem (<c>upload_attachment</c>'s
+    /// <c>filePath</c>, <c>download_email_attachment</c>'s <c>savePath</c>). Off unless the host turns it
+    /// on: only meaningful when the caller and the server share a filesystem (a local stdio server),
+    /// and on a remote server it would hand the server's files to whoever calls the tools.
+    /// </summary>
+    public bool LocalFileAccess { get; set; }
+
+    /// <summary>
     /// Server-side constructor: provide token file path and read-only mode directly.
     /// </summary>
     public GlobalContext(string tokenFilePath, bool readOnlyMode = false)

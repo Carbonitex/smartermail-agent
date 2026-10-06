@@ -38,27 +38,30 @@ public static class UserPrompts
 
     [McpServerPrompt, Description("Sends an email with a file attachment. First uploads the file, then sends the email using the attachment GUID.")]
     public static IEnumerable<ChatMessage> SendEmailWithAttachment(
-        [Description("Full path to the file to attach")] string filePath,
+        [Description("The file to attach: a path on your machine, or a description of a file to create")] string file,
         [Description("Recipient email address")] string to,
         [Description("Email subject")] string subject,
         [Description("Email body text")] string body) =>
     [
         new ChatMessage(ChatRole.User,
-            $"Send an email to {to} with subject '{subject}' and attach the file at {filePath}. Body: {body}"),
+            $"Send an email to {to} with subject '{subject}' and attach {file}. Body: {body}"),
         new ChatMessage(ChatRole.Assistant,
-            $"I'll first upload the file '{filePath}' using upload_attachment to get an attachment GUID, then send the email to {to} using send_email_with_attachments with that GUID.")
+            "I'll upload the file with upload_attachment: its contents as text for a text file, otherwise base64Content " +
+            "(or filePath if this server runs on your machine, or the server's /attachments endpoint if I can run shell commands). " +
+            $"Then I'll send the email to {to} with send_email_with_attachments and the attachmentGuid it returns.")
     ];
 
     [McpServerPrompt, Description("Sends an HTML email with an embedded inline image. The image displays within the email body rather than as a separate attachment.")]
     public static IEnumerable<ChatMessage> SendEmailWithInlineImage(
-        [Description("Full path to the image file")] string imagePath,
+        [Description("The image: a path on your machine, or a description of an image to create")] string image,
         [Description("Recipient email address")] string to,
-        [Description("Email subject")] string subject,
-        [Description("Content ID for the image (used in HTML as src='cid:yourId')")] string contentId = "inlineimg") =>
+        [Description("Email subject")] string subject) =>
     [
         new ChatMessage(ChatRole.User,
-            $"Send an HTML email to {to} with subject '{subject}' and embed the image at {imagePath} inline in the body."),
+            $"Send an HTML email to {to} with subject '{subject}' and embed {image} inline in the body."),
         new ChatMessage(ChatRole.Assistant,
-            $"I'll upload the image using upload_attachment with contentId='{contentId}' to get an attachment GUID. Then I'll send an HTML email using send_email_with_attachments with <img src='cid:{contentId}' /> in the body to embed the image inline.")
+            "I'll upload the image with upload_attachment and inline=true. SmarterMail assigns the content ID, so I'll put the " +
+            "htmlReference it returns in the body as <img src=\"cid:...\">, then send the HTML email with " +
+            $"send_email_with_attachments to {to} using the same attachmentGuid.")
     ];
 }

@@ -73,6 +73,19 @@ public sealed class McpHostingTests
     }
 
     [Fact]
+    public void Local_file_access_follows_the_transport_unless_set()
+    {
+        Assert.False(Parse(Complete).Settings!.LocalFiles);
+        Assert.True(Parse(Complete, "--stdio").Settings!.LocalFiles);
+        Assert.True(Parse(With(("SMARTERMAIL_LOCAL_FILES", "true"))).Settings!.LocalFiles);
+        Assert.False(Parse(With(("SMARTERMAIL_LOCAL_FILES", "false")), "--stdio").Settings!.LocalFiles);
+
+        var (settings, errors) = Parse(With(("SMARTERMAIL_LOCAL_FILES", "maybe")));
+        Assert.Null(settings);
+        Assert.Contains(errors, e => e.Contains("SMARTERMAIL_LOCAL_FILES"));
+    }
+
+    [Fact]
     public void Http_without_an_api_key_fails_before_signing_in()
     {
         var (settings, errors) = Parse(With(("API_KEY", null)));

@@ -6,6 +6,10 @@ The shared host for the fixed-account MCP servers (`src/McpUser`, `src/McpAdmin`
 - `McpHostSettings.cs` — parses and validates the environment **before** signing in, and reports every
   problem at once (exit code 1). `SMARTERMAIL_READ_ONLY` defaults to **true**; an unrecognised value is
   an error, never a guess. The HTTP transport refuses to start without `API_KEY`.
+  `SMARTERMAIL_LOCAL_FILES` (default: on for stdio, off for HTTP) sets `GlobalContext.LocalFileAccess`,
+  which the attachment tools check before touching a path (the agent never sets it).
+- `McpHostDefinition.MapHttpEndpoints` adds routes next to `/mcp` behind the same API key (McpUser:
+  `POST /attachments`); `Instructions` sets the MCP `instructions` from the settings.
 - `McpHost.cs` — startup sign-in, then either transport:
   - **stdio** (`--stdio` or `MCP_TRANSPORT=stdio`): `Host.CreateApplicationBuilder` +
     `WithStdioServerTransport()`. stdout carries JSON-RPC only: every logger writes to stderr

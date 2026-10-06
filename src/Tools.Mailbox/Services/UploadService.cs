@@ -49,79 +49,88 @@ public class UploadService
     }
 
     /// <summary>
-    /// Upload a file as an email attachment.
+    /// SmarterMail's placeholder content ID: it assigns a fresh one and returns it as <c>cid</c>. It
+    /// rejects any other value that is not one of its own 32-hex-digit IDs ("Invalid content ID"), so
+    /// callers cannot choose readable names.
     /// </summary>
-    /// <param name="userContext">The authenticated user context</param>
-    /// <param name="filePath">Full path to the file to upload</param>
-    /// <param name="attachmentGuid">Optional existing attachment session GUID. If not provided, a new one is generated.</param>
-    /// <param name="contentId">Optional Content-ID for inline images. Use "cidgenerate" to auto-generate, or provide a specific ID to use in HTML as src="cid:yourId"</param>
-    /// <returns>Upload result containing the attachment GUID to use when sending the email</returns>
+    public const string GenerateContentId = "cidgenerate";
+
+    /// <summary>
+    /// Upload a file from this process's filesystem as an email attachment. Only for hosts whose
+    /// caller shares the filesystem (see <see cref="GlobalContext.LocalFileAccess"/>).
+    /// </summary>
+    /// <param name="attachmentGuid">Existing attachment session to add to; a new one if not provided.</param>
+    /// <param name="inline">Upload as an inline image: the result's <see cref="UploadResult.ContentId"/> goes in <c>&lt;img src="cid:…"&gt;</c>.</param>
     public static async Task<UploadResult> UploadAttachmentAsync(
         UserContext userContext,
         string filePath,
         string? attachmentGuid = null,
-        string? contentId = null)
+        bool inline = false)
+    {
+        if (!File.Exists(filePath))
+            return new UploadResult { Success = false, Error = $"File not found: {filePath}" };
+
+        byte[] fileBytes;
+        try { fileBytes = await File.ReadAllBytesAsync(filePath); }
+        catch (Exception ex) { return new UploadResult { Success = false, Error = ex.Message }; }
+
+        return await UploadAttachmentAsync(userContext, fileBytes, Path.GetFileName(filePath),
+            GetContentType(filePath), attachmentGuid, inline);
+    }
+
+    /// <summary>
+    /// Upload bytes as an email attachment, to send with the returned <see cref="UploadResult.Guid"/>.
+    /// </summary>
+    /// <param name="inline">Upload as an inline image: the result's <see cref="UploadResult.ContentId"/> goes in <c>&lt;img src="cid:…"&gt;</c>.</param>
+    public static async Task<UploadResult> UploadAttachmentAsync(
+        UserContext userContext,
+        byte[] fileBytes,
+        string fileName,
+        string? contentType = null,
+        string? attachmentGuid = null,
+        bool inline = false)
     {
         if (string.IsNullOrEmpty(attachmentGuid))
             attachmentGuid = Guid.NewGuid().ToString();
+        contentType = string.IsNullOrWhiteSpace(contentType) ? GetContentType(fileName) : contentType;
 
-        // If contentId is provided, use the /api/v1/mail/attachment endpoint which properly handles inline images
-        if (!string.IsNullOrEmpty(contentId))
-        {
-            return await UploadAttachmentWithContentIdAsync(userContext, filePath, attachmentGuid, contentId);
-        }
+        if (inline)
+            return await UploadInlineAttachmentAsync(userContext, fileBytes, fileName, contentType, attachmentGuid);
 
-        // Otherwise use the resumable /api/upload endpoint for regular attachments
+        // Regular attachments go through the resumable /api/upload endpoint.
         var contextData = JsonSerializer.Serialize(new { guid = attachmentGuid });
-        var result = await UploadFileAsync(userContext, filePath, ContextType.Attachment, contextData);
+        var result = await UploadBytesAsync(userContext, fileBytes, fileName, contentType, ContextType.Attachment, contextData);
         result.Guid = attachmentGuid;
         return result;
     }
 
     /// <summary>
-    /// Upload an inline image attachment using the /api/v1/mail/attachment endpoint.
+    /// Upload an inline image to <c>/api/v1/mail/attachment/{attachguid}/cidgenerate</c>. SmarterMail
+    /// answers <c>{"cid":"…","link":"…","returnData":"…","success":true}</c>.
     /// </summary>
-    private static async Task<UploadResult> UploadAttachmentWithContentIdAsync(
+    private static async Task<UploadResult> UploadInlineAttachmentAsync(
         UserContext userContext,
-        string filePath,
-        string attachmentGuid,
-        string contentId)
+        byte[] fileBytes,
+        string fileName,
+        string contentType,
+        string attachmentGuid)
     {
         try
         {
-            if (!File.Exists(filePath))
-            {
-                return new UploadResult
-                {
-                    Success = false,
-                    Error = $"File not found: {filePath}"
-                };
-            }
-
-            var fileBytes = await File.ReadAllBytesAsync(filePath);
-            var fileName = Path.GetFileName(filePath);
-            var contentType = GetContentType(filePath);
-
             using var content = new MultipartFormDataContent();
             var fileContent = new ByteArrayContent(fileBytes);
             fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
             content.Add(fileContent, "file", fileName);
 
-            // Use the /api/v1/mail/attachment/{attachguid}/{contentid} endpoint
-            var endpoint = $"/api/v1/mail/attachment/{attachmentGuid}/{contentId}";
-            var response = await userContext.PostMultipartAsync<JsonElement>(endpoint, content);
+            var response = await userContext.PostMultipartAsync<JsonElement>(
+                $"/api/v1/mail/attachment/{attachmentGuid}/{GenerateContentId}", content);
 
-            // Extract the generated contentId if "cidgenerate" was used
-            string? actualContentId = contentId;
-            try
-            {
-                if (response.ValueKind == JsonValueKind.Object &&
-                    response.TryGetProperty("contentId", out var cidProp))
-                {
-                    actualContentId = cidProp.GetString();
-                }
-            }
-            catch { /* Keep original contentId */ }
+            var cid = response.ValueKind == JsonValueKind.Object &&
+                      response.TryGetProperty("cid", out var cidProp) && cidProp.ValueKind == JsonValueKind.String
+                ? cidProp.GetString()
+                : null;
+            if (string.IsNullOrEmpty(cid))
+                return new UploadResult { Success = false, Error = $"SmarterMail did not return a content ID: {response.GetRawText()}" };
 
             return new UploadResult
             {
@@ -130,38 +139,35 @@ public class UploadService
                 FileName = fileName,
                 FileSize = fileBytes.Length,
                 ContentType = contentType,
-                ContentId = actualContentId,
+                ContentId = cid,
                 ServerResponse = response
             };
         }
         catch (Exception ex)
         {
-            return new UploadResult
-            {
-                Success = false,
-                Error = ex.Message
-            };
+            return new UploadResult { Success = false, Error = DescribeError(ex) };
         }
     }
 
-    /// <summary>
-    /// Upload a file as an email attachment from a byte array.
-    /// </summary>
-    public static async Task<UploadResult> UploadAttachmentAsync(
-        UserContext userContext,
-        byte[] fileBytes,
-        string fileName,
-        string? contentType = null,
-        string? attachmentGuid = null)
+    /// <summary>The API's own <c>message</c> when SmarterMail refused, not just the status code.</summary>
+    internal static string DescribeError(Exception ex)
     {
-        if (string.IsNullOrEmpty(attachmentGuid))
-            attachmentGuid = Guid.NewGuid().ToString();
+        if (ex is not SmarterMailApiException apiEx)
+            return ex.Message;
 
-        var contextData = JsonSerializer.Serialize(new { guid = attachmentGuid });
+        var message = apiEx.ResponseBody;
+        try
+        {
+            using var doc = JsonDocument.Parse(apiEx.ResponseBody);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String)
+                message = m.GetString();
+        }
+        catch (JsonException) { }
 
-        var result = await UploadBytesAsync(userContext, fileBytes, fileName, contentType, ContextType.Attachment, contextData);
-        result.Guid = attachmentGuid;
-        return result;
+        return string.IsNullOrWhiteSpace(message)
+            ? $"SmarterMail returned {(int)apiEx.StatusCode} {apiEx.StatusCode} for {apiEx.Endpoint}"
+            : $"SmarterMail returned {(int)apiEx.StatusCode} {apiEx.StatusCode} for {apiEx.Endpoint}: {message}";
     }
 
     /// <summary>
@@ -254,7 +260,7 @@ public class UploadService
             return new UploadResult
             {
                 Success = false,
-                Error = ex.Message
+                Error = DescribeError(ex)
             };
         }
     }
@@ -316,7 +322,7 @@ public class UploadService
             return new UploadResult
             {
                 Success = false,
-                Error = ex.Message
+                Error = DescribeError(ex)
             };
         }
     }

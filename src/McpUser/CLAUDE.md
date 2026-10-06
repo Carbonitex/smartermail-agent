@@ -27,6 +27,16 @@ settings, plus the domain-admin tools (`domain_*`) when the account is a domain 
 | `SMARTERMAIL_READ_ONLY` | no | **`true` by default.** `false` also registers write tools |
 | `SMARTERMAIL_DOMAIN_TOOLS` | no | `auto` (default): after sign-in, GET `/api/v1/settings/domain/data` as the account (10 s timeout); 2xx registers the 107 `domain_*` tools, anything else leaves them out. `true` / `false` force it. One stderr line logs the decision |
 | `SMARTERMAIL_TOKEN_FILE` | no | Token file, default `/tmp/smartermail_token.json` |
+| `SMARTERMAIL_LOCAL_FILES` | no | Default `true` for stdio, `false` for HTTP: whether `upload_attachment` `filePath` / `download_email_attachment` `savePath` may touch this process's filesystem |
+
+## Attachments
+
+`AttachmentUpload.cs` maps `POST /attachments` (HTTP only, same API key as `/mcp`, 403 when
+read-only): multipart `file` fields plus optional `inline` / `attachmentGuid`, answered with
+`MailTools.UploadResultJson` per file, so agents with a shell can `curl -F file=@…` instead of sending
+base64 through the model. HTTP without local files also sends MCP `instructions` describing it.
+SmarterMail only accepts its own 32-hex content IDs, so inline uploads always use `cidgenerate` and
+return the `cid` it answers with. Tests: `tests/SmarterMail.Tests/AttachmentToolTests.cs`.
 
 ## Tools (59, or 166 for a domain admin)
 

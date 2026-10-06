@@ -12,6 +12,8 @@ return await McpHost.RunAsync(args, new McpHostDefinition
     PasswordVariable = "SMARTERMAIL_PASSWORD",
     UserType = "user",
     DefaultTokenFile = "/tmp/smartermail_token.json",
+    MapHttpEndpoints = AttachmentUpload.Map,
+    Instructions = settings => settings.Transport == McpTransport.Http && !settings.LocalFiles ? AttachmentUpload.Instructions : null,
 },
 async (userContext, mcp) =>
 {

@@ -55,9 +55,9 @@ Served by **smartermail-mcp-user** and by the agent for mailbox and domain-admin
 | Tool | Kind | Description |
 |---|---|---|
 | `create_draft` | write | Save an email as a draft without sending |
-| `download_email_attachment` | read | Download an email attachment and save it to a local file path. Use get_email_attachments first to get the list of attachment filenames. |
+| `download_email_attachment` | read | Fetch an email attachment (filenames from get_email_attachments). Text attachments come back as text; binary ones as base64 when includeBase64=true (up to 5 MB). On a local server that shares your filesystem, savePath writes the file there instead. |
 | `forward_email` | write | Forward an email message to other recipients |
-| `get_email_attachments` | read | Get attachments from an email message |
+| `get_email_attachments` | read | List an email's attachments: filename, contentType (from the file name), approximate size (SmarterMail rounds to KB) and the content IDs of images embedded inline in the body. Read a text attachment with read_email_part; download_email_attachment fetches any of them. |
 | `get_email_message` | read | Get a specific email message by UID and folder |
 | `get_emails` | read | Get email metadata like subject, from, date, id, read, flagged, etc. from a specific folder with optional search and pagination |
 | `move_emails` | write | Move emails to a different folder |
@@ -66,9 +66,9 @@ Served by **smartermail-mcp-user** and by the agent for mailbox and domain-admin
 | `reply_to_email` | write | Reply to an email message |
 | `send_draft` | write | Send a previously saved draft email |
 | `send_email` | write | Send a simple email |
-| `send_email_with_attachments` | write | Send an email with previously uploaded attachments. Use upload_attachment first to upload files, then use the returned attachmentGuid here. |
+| `send_email_with_attachments` | write | Send an email with previously uploaded attachments. Use upload_attachment first, then pass its attachmentGuid here. Inline images uploaded with inline=true are shown where the body has <img src="cid:..."> with their htmlReference. |
 | `set_email_properties` | write | Mark emails as read/unread, flagged/unflagged, or add tags |
-| `upload_attachment` | write | Upload a file attachment for use in composing emails. Returns an attachmentGuid that can be used with send_email_with_attachments. |
+| `upload_attachment` | write | Upload a file to attach to an email, then send it with send_email_with_attachments using the returned attachmentGuid. Give the file as exactly one of: base64Content (any file, base64-encoded), text (a text file's contents, e.g. .txt/.csv/.ics/.html) or filePath (only on a local server that shares your filesystem). For an image shown inside the HTML body, set inline=true and use the returned htmlReference as the src: <img src="cid:...">. SmarterMail assigns the content ID, so always use the returned value. Several files go in one email by passing the first call's attachmentGuid to the next calls. |
 
 ### Note
 

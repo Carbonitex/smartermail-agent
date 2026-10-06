@@ -71,6 +71,7 @@ Or use [`examples/docker-compose.yml`](../examples/docker-compose.yml).
 | `MCP_TRANSPORT` | no | `http` | `http` or `stdio`. The `--stdio` argument does the same |
 | `SMARTERMAIL_READ_ONLY` | no | `true` | `false` also lists tools that send, change or delete |
 | `SMARTERMAIL_DOMAIN_TOOLS` | no | `auto` | `auto`, `true` or `false`. See below |
+| `SMARTERMAIL_LOCAL_FILES` | no | `true` for stdio, `false` for HTTP | Lets `upload_attachment` read and `download_email_attachment` write paths on the server's filesystem. See [Attachments](#attachments) |
 | `SMARTERMAIL_TOKEN_FILE` | no | `/tmp/smartermail_token.json` | Where the session token is kept inside the container |
 
 Any value it doesn't recognise is treated as an error, not guessed. The server lists every problem
@@ -90,6 +91,41 @@ Set `SMARTERMAIL_READ_ONLY=false` to allow sending, moving, deleting and setting
 tool carries MCP annotations. `readOnlyHint` marks tools that only read, and `destructiveHint` marks
 writes that delete, disable or disconnect. Clients that support these use them to decide when to
 ask you before running a tool.
+
+## Attachments
+
+`upload_attachment` takes the file as **one** of:
+
+- `base64Content` (plus `fileName`): any file, base64-encoded. A `data:` URL works too.
+- `text` (plus `fileName`): a text file's contents, such as a CSV, ICS or HTML file.
+- `filePath`: a path on the **server's** filesystem. This only works when `SMARTERMAIL_LOCAL_FILES`
+  is on, which is the default for stdio, where the client starts the server on your own machine.
+  Over HTTP the server isn't on the client's machine, so a path would name the server's files; it's
+  refused unless you turn it on (for example, when client and server share a mounted volume).
+
+For an image inside the HTML body, upload it with `inline=true`. SmarterMail assigns the content ID
+(it rejects names you pick), so use the `htmlReference` the tool returns, e.g.
+`<img src="cid:29092e9484a04d5c8f56e6921f83524b">`, in the body you pass to
+`send_email_with_attachments` along with the same `attachmentGuid`. To put several files in one email,
+pass the first upload's `attachmentGuid` to the next ones.
+
+**`POST /attachments` (HTTP only).** Base64 passes every byte of the file through the model, which is
+slow and expensive for anything but small files. A client that can run shell commands can upload the
+file directly instead, with the same API key as `/mcp`:
+
+```bash
+curl -H "X-API-Key: $API_KEY" -F file=@report.pdf -F file=@chart.png http://localhost:8080/attachments
+curl -H "X-API-Key: $API_KEY" -F file=@banner.png -F inline=true -F attachmentGuid=<guid> http://localhost:8080/attachments
+```
+
+The answer has the `attachmentGuid` and, for each file, the same fields as `upload_attachment`
+(`contentId` and `htmlReference` for inline images). In HTTP mode the server tells MCP clients about
+this endpoint in its `instructions`. Read-only mode answers it with 403.
+
+`download_email_attachment` returns a text attachment's contents, and a binary one as base64 when
+you ask with `includeBase64=true` (up to 5 MB). `savePath` writes to the server's filesystem and also
+needs `SMARTERMAIL_LOCAL_FILES`. `get_email_attachments` lists each attachment's name, content type,
+approximate size (SmarterMail rounds to KB) and the content IDs of the message's inline images.
 
 ## Domain-admin tools
 

@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `upload_attachment` takes the file as `base64Content` or `text` (with `fileName`), so remote
+  clients can attach files they have. New `inline=true` embeds an image: SmarterMail assigns the
+  content ID and the tool returns it as `htmlReference` (`cid:…`).
+- smartermail-mcp-user: `POST /attachments` (HTTP, same API key): upload files with
+  `curl -F file=@…` instead of passing base64 through the model. HTTP servers describe it in their
+  MCP `instructions`.
+- `download_email_attachment` returns text attachments' contents, and binary ones as base64 with
+  `includeBase64=true`; `savePath` is now optional.
+- `SMARTERMAIL_LOCAL_FILES` (MCP servers): whether attachment tools may use paths on the server's
+  filesystem. Default: on for stdio, off for HTTP.
+
+### Changed
+
+- `upload_attachment`'s `contentId` is replaced by `inline`. SmarterMail rejects every content ID
+  but its own, so custom IDs never worked.
+
+### Fixed
+
+- **Security:** `upload_attachment` (`filePath`) and `download_email_attachment` (`savePath`) read and
+  wrote any path on the *server's* filesystem. In smartermail-agent and HTTP MCP servers that is
+  the server's own files, reachable by any signed-in user, or by an email crafted to steer the model.
+  `download_email_attachment` is a read tool, so this even worked on read-only accounts. Paths
+  now work only where `SMARTERMAIL_LOCAL_FILES` is on, and never in smartermail-agent.
+- Inline image uploads returned `cid:cidgenerate` instead of the content ID SmarterMail assigned, so
+  the image did not show.
+- Failed uploads report SmarterMail's message (e.g. "Invalid content ID") instead of only the
+  status code.
+- `get_email_attachments` reported every attachment as not inline, with no content type, index 0.
+  It now gives the content type (from the file name), SmarterMail's part ID and approximate size,
+  and the message's inline content IDs. `read_email_part` now reads `.txt`/`.ics`/`.json`/… attachments
+  that it wrongly reported as binary.
+
 ## [1.1.0]
 
 ### Added
