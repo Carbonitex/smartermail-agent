@@ -27,6 +27,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Agent: tool cards no longer collapse into thin lines once a chat is taller than the window.
 - Agent: dismissing a password manager's passkey prompt (e.g. LastPass) no longer fails the
   ceremony; it falls through to the browser's own passkey sheet (iCloud Keychain, Windows Hello…).
 - **Security:** `upload_attachment` (`filePath`) and `download_email_attachment` (`savePath`) read and

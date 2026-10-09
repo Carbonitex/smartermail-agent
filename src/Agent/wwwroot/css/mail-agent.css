@@ -360,6 +360,8 @@ input:focus, textarea:focus, select:focus {
   display: flex; flex-direction: column; gap: 14px;
   scrollbar-width: thin;
 }
+/* Never shrink to fit: a tool card's overflow:hidden would let it collapse to its border. */
+.messages > * { flex: none; }
 .messages::-webkit-scrollbar { width: 10px; }
 .messages::-webkit-scrollbar-thumb { background: oklch(25% 0 0); border-radius: 6px; }
 
