@@ -27,7 +27,7 @@ function write(key, value) {
   }
 }
 
-export const DEFAULT_MODEL = '~deepseek/deepseek-v4-flash-latest';
+export const DEFAULT_MODEL = 'anthropic/claude-haiku-5.5';
 
 export const storage = {
   get openRouterKey() { return read('orKey'); },

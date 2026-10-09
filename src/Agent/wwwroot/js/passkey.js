@@ -10,6 +10,7 @@
  */
 
 import { PROFILE_PRF_SALT, b64url, fromB64url, random } from './vault.js';
+import { createCredential, getCredential } from './webauthn.js';
 
 /** The authenticator gave no PRF output: it cannot unlock a profile. */
 export class NoPrfError extends Error {
@@ -105,14 +106,15 @@ function prfResult(credential) {
  * one get() for this credential (its challenge is never verified: it only derives a key).
  * Throws NoPrfError when there is no PRF at all; the new passkey is then reported as unknown
  * to the browser (where supported) so it does not linger in the user's password manager.
+ * A password manager's dismissed prompt falls through to the browser's own (webauthn.js).
  */
 export async function createPasskey(serverOptions) {
-  const credential = await globalThis.navigator.credentials.create({ publicKey: creationOptions(serverOptions) });
+  const { credential, native } = await createCredential(creationOptions(serverOptions));
   if (!credential) throw new Error('No passkey was created.');
 
   const ext = credential.getClientExtensionResults?.().prf;
   let prf = prfResult(credential);
-  if (!prf && ext && ext.enabled !== false) prf = await prfFor(b64url(credential.rawId), serverOptions.rp.id);
+  if (!prf && ext && ext.enabled !== false) prf = await prfFor(b64url(credential.rawId), serverOptions.rp.id, native);
   if (!prf) {
     try {
       await globalThis.PublicKeyCredential?.signalUnknownCredential?.({ rpId: serverOptions.rp.id, credentialId: b64url(credential.rawId) });
@@ -125,23 +127,24 @@ export async function createPasskey(serverOptions) {
 
 /** Signs in with any profile passkey (no allow-list). Returns { credential, prf }; NoPrfError without PRF. */
 export async function getPasskey(serverOptions) {
-  const credential = await globalThis.navigator.credentials.get({ publicKey: requestOptions(serverOptions) });
+  const { credential } = await getCredential(requestOptions(serverOptions));
   if (!credential) throw new Error('No passkey was chosen.');
   return { credential: assertionJson(credential), prf: prfResult(credential) };
 }
 
-/** PRF output of one known credential, with a local challenge (nothing is sent to the server). */
-async function prfFor(credentialId, rpId) {
-  const assertion = await globalThis.navigator.credentials.get({
-    publicKey: {
-      challenge: random(32),
-      rpId,
-      allowCredentials: [{ type: 'public-key', id: fromB64url(credentialId) }],
-      userVerification: 'required',
-      timeout: 120000,
-      extensions: prfInput()
-    }
-  });
+/**
+ * PRF output of one known credential, with a local challenge (nothing is sent to the server).
+ * `native`: the credential was made past a password manager, so ask the browser directly again.
+ */
+async function prfFor(credentialId, rpId, native) {
+  const { credential: assertion } = await getCredential({
+    challenge: random(32),
+    rpId,
+    allowCredentials: [{ type: 'public-key', id: fromB64url(credentialId) }],
+    userVerification: 'required',
+    timeout: 120000,
+    extensions: prfInput()
+  }, { native });
   return prfResult(assertion);
 }
 

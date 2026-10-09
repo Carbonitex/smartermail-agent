@@ -21,11 +21,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Agent: the default model is Claude Haiku 5.5 (`anthropic/claude-haiku-5.5` on OpenRouter).
 - `upload_attachment`'s `contentId` is replaced by `inline`. SmarterMail rejects every content ID
   but its own, so custom IDs never worked.
 
 ### Fixed
 
+- Agent: dismissing a password manager's passkey prompt (e.g. LastPass) no longer fails the
+  ceremony; it falls through to the browser's own passkey sheet (iCloud Keychain, Windows Hello…).
 - **Security:** `upload_attachment` (`filePath`) and `download_email_attachment` (`savePath`) read and
   wrote any path on the *server's* filesystem. In smartermail-agent and HTTP MCP servers that is
   the server's own files, reachable by any signed-in user, or by an email crafted to steer the model.

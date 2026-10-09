@@ -20,6 +20,8 @@
  *   { v: 1, locked: true, credentialId, iv, ciphertext, version }   base64url fields
  */
 
+import { createCredential, getCredential } from './webauthn.js';
+
 const KEY = 'sma.resume';
 const enc = new TextEncoder();
 
@@ -155,21 +157,18 @@ export async function prfSupported() {
  * store.save(…, { lock }). Must run inside a user gesture.
  */
 export async function createLock() {
-  const creds = globalThis.navigator.credentials;
-  const credential = await creds.create({
-    publicKey: {
-      rp: { id: globalThis.location.hostname, name: 'SmarterMail Agent' },
-      user: {
-        id: random(16),
-        name: 'SmarterMail Agent on this device',
-        displayName: 'SmarterMail Agent (this device)'
-      },
-      challenge: random(32),
-      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-      authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
-      timeout: 120000,
-      extensions: { prf: { eval: { first: PRF_SALT } } }
-    }
+  const { credential, native } = await createCredential({
+    rp: { id: globalThis.location.hostname, name: 'SmarterMail Agent' },
+    user: {
+      id: random(16),
+      name: 'SmarterMail Agent on this device',
+      displayName: 'SmarterMail Agent (this device)'
+    },
+    challenge: random(32),
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+    authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+    timeout: 120000,
+    extensions: { prf: { eval: { first: PRF_SALT } } }
   });
   if (!credential) throw new Error('No passkey was created.');
 
@@ -179,7 +178,7 @@ export async function createLock() {
   }
   const credentialId = b64url(credential.rawId);
   // Some authenticators answer PRF at creation, others only on an assertion.
-  const output = ext.results?.first || await prfOutput(credentialId);
+  const output = ext.results?.first || await prfOutput(credentialId, native);
   return { key: await deriveKey(output), credentialId };
 }
 
@@ -198,17 +197,15 @@ export async function unlock() {
   return bundle;
 }
 
-async function prfOutput(credentialId) {
-  const assertion = await globalThis.navigator.credentials.get({
-    publicKey: {
-      challenge: random(32),
-      rpId: globalThis.location.hostname,
-      allowCredentials: [{ type: 'public-key', id: fromB64url(credentialId) }],
-      userVerification: 'required',
-      timeout: 120000,
-      extensions: { prf: { eval: { first: PRF_SALT } } }
-    }
-  });
+async function prfOutput(credentialId, native = false) {
+  const { credential: assertion } = await getCredential({
+    challenge: random(32),
+    rpId: globalThis.location.hostname,
+    allowCredentials: [{ type: 'public-key', id: fromB64url(credentialId) }],
+    userVerification: 'required',
+    timeout: 120000,
+    extensions: { prf: { eval: { first: PRF_SALT } } }
+  }, { native });
   const first = assertion?.getClientExtensionResults?.().prf?.results?.first;
   if (!first) throw new Error('The passkey did not return its key (no PRF support).');
   return first;

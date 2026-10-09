@@ -414,7 +414,7 @@ export async function seed(newAccount) {
     check: accountsCheck(Buffer.from(keys.accountsKey)),
     publicKey: inbox.publicKey,
     encryptedPrivateKey: inbox.encryptedPrivateKey,
-    settings: await vault.sealJson(keys.settingsKey, { v: 1, openRouterKey: 'sk-or-v1-stub', model: '~deepseek/deepseek-v4-flash-latest', toolsOff: [] }),
+    settings: await vault.sealJson(keys.settingsKey, { v: 1, openRouterKey: 'sk-or-v1-stub', model: 'anthropic/claude-haiku-5.5', toolsOff: [] }),
     settingsVersion: 1,
     accounts,
     taskKey: 'sk-or-stub',
@@ -424,7 +424,7 @@ export async function seed(newAccount) {
   };
   const task = {
     id: b64(crypto.randomBytes(9)), enabled: true, status: 'ok', lastRunAt: null,
-    definition: definitionOf({ name: 'Morning summary', prompt: 'Summarise unread mail from the last day.', cron: '0 7 * * 1-5', timeZone: 'America/Phoenix', accountIds: [accounts[0].id], model: '~deepseek/deepseek-v4-flash-latest' })
+    definition: definitionOf({ name: 'Morning summary', prompt: 'Summarise unread mail from the last day.', cron: '0 7 * * 1-5', timeZone: 'America/Phoenix', accountIds: [accounts[0].id], model: 'anthropic/claude-haiku-5.5' })
   };
   profile.tasks.set(task.id, task);
   profiles.set(id, profile);

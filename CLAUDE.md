@@ -248,6 +248,8 @@ Web/
 wwwroot/                      the browser UI (owned by the frontend; wwwroot/dev/ is not shipped)
   js/vault.js                 profile cryptography (pure WebCrypto; node-tested, incl. a C#-sealed vector)
   js/passkey.js               WebAuthn glue: options in, credentials out WITHOUT clientExtensionResults
+  js/webauthn.js              navigator.credentials past a password manager: a refused extension prompt
+                              retries once on a fresh iframe's native credentials (passkey.js, resume.js)
   js/profile.js               profile flows (create, passkey / recovery sign-in, unlock, settings sync)
   js/profile-ui.js            passkey panel, "save to a profile" offer, Profile menu, recovery-code dialog
   js/tasks.js                 the Tasks dialog: list, editor (cron presets), runs, transcript viewer
