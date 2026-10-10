@@ -29,6 +29,14 @@ All notable changes to this project are documented here. The format follows
   7 days). Approving a destructive or admin change asks for your passkey, bound to that exact change.
   The emailed report says how many changes are waiting, never what they are. New env
   `APPROVAL_MAX_PENDING` (100), `TASK_MAX_PROPOSALS` (50).
+- Agent: condition-triggered tasks. A task can run when a condition over a read tool's result holds
+  (checked every few minutes, no AI involved in the check) instead of on a schedule: run the prompt
+  with what matched, or just email an alert. "When something happens" in the task editor, with "Test
+  probe" to see the real result and pick fields by clicking. New items, counts, thresholds, text /
+  regex / date checks; edge or level firing, hold-for, cooldown, active hours and a daily cap.
+  Matched data reaches the model only as a tool result. `POST /api/tasks/probe`; env
+  `TRIGGERS_ENABLED`, `TRIGGER_MIN_INTERVAL_MINUTES`, `TRIGGERS_PER_PROFILE`,
+  `TRIGGER_MAX_RUNS_PER_DAY`, `TRIGGER_CONCURRENCY`, `PROBES_PER_HOST_PER_MINUTE`.
 
 - `upload_attachment` takes the file as `base64Content` or `text` (with `fileName`), so remote
   clients can attach files they have. New `inline=true` embeds an image: SmarterMail assigns the

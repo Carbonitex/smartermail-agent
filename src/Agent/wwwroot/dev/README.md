@@ -40,7 +40,9 @@ across the three scopes and canned data, so the UI can be exercised without the
 Environment: `PORT` (default `8787`, `0` picks a free port and logs it),
 `PATH_BASE` (default `/mail-agent`), `ALLOW_PRIVATE_HOSTS`,
 `TWO_FACTOR_TTL_MS` (default `300000`), `SESSION_MAX_ACCOUNTS` (default `5`),
-`RESUME` (default on; `false` hides "Remember me"), `RESUME_DAYS` (default `30`).
+`RESUME` (default on; `false` hides "Remember me"), `RESUME_DAYS` (default `30`),
+`MODE=browser` (browser-only), `TASKS=false`, `TRIGGERS=false` (no condition tasks),
+`SEED_PROFILE=1` (below).
 
 In a remembered session every tool call and account change bumps the resume
 version (as a real refresh would rotate a token), and a cookie request that
@@ -194,4 +196,12 @@ prints a recovery code for a seeded profile (two accounts, one delegated, a task
 a result). On the login view choose **Use a recovery code** and paste it: you land in a profile
 session with the Profile menu and the Tasks dialog working, and the result opens with the real
 browser crypto. A real passkey works against the stub too (it just is not verified).
+
+The seeded profile also has two pending approvals under **Tasks → To approve** (`stub-approvals.mjs`;
+one of them fails when approved). Condition tasks can be built under "When something happens" in the
+task editor: the stub's sysadmin tools `get_spool_message_counts` (its `waiting` count grows on every
+call, so a `> N` condition turns true), `get_ssl_certificates` and `get_throttled_users` answer
+**Test probe**, and `POST /api/tasks/probe` evaluates predicates with `stub-predicate.mjs`.
+`search_log_files` returns ~300 KB of SMTP log, so its result becomes an artifact and
+`analyze_result` runs (against a scripted sub-agent, no OpenRouter call).
 

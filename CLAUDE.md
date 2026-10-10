@@ -205,7 +205,10 @@ Tasks/
   TaskPrompt.cs               the unattended system prompt, incl. `History`: when the previous successful
                               run started (task time zone) and whether a later attempt failed
   TaskRunner.cs               one run: accounts, gate, loop, sealed transcript, optional email
-  TaskRunScheduler.cs         30 s tick, claim, concurrency, "Run now"
+  TaskRunScheduler.cs         30 s tick, claim, concurrency, "Run now"; StartTriggered for condition runs
+  Approvals/                  approval queue: hash, gate sink, executor, maintenance (+ Storage/ProposalStore.cs)
+  Triggers/                   condition tasks: Predicate, JsonPath, TriggerLogic, TriggerProber, ProbeRunner,
+                              ProbeHostBucket, TriggerStore, TriggerPrompt, TriggerAlert, TriggerCodes
 Auth/
   HostGuard.cs                SSRF guard (scheme + resolved-IP checks)
   Sealer.cs                   AES-256-GCM framing with key rotation, label + row-context AAD (+ Base64Url)
@@ -397,7 +400,7 @@ whose resume version is newer, carries `X-Resume-Version: <newer>`; the browser 
 | `GET /api/tools` | session | `200 [ { name, description, inputSchema, category, scope, write, destructive } ]` — only tools with at least one eligible account; `inputSchema` carries the injected `account` property (below) |
 | `POST /api/tools/call` | session, `api` limiter (120/min/IP) | `{ name, arguments: {…, account?} }` → `200 { isError, content, account }` (`account` = the handle it ran as, `null` if refused before resolving). Tool exceptions **and payloads carrying `success:false`** → `isError: true`. Missing / unknown / wrong-role `account` → `200 isError` listing the valid handles. Write tool on a read-only account → `403 { error }` naming the handle. Unknown tool → `404`. |
 | `POST /mcp` | session cookie **or** `Authorization: Bearer <MCP token>` (`401` + `WWW-Authenticate: Bearer` for a bad/expired/revoked token or a raw session id) | Stateless MCP, same per-session tool list and schemas, same dispatcher. Account and read-only refusals are `isError: true`; tool results pass through unchanged. |
-| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds, analysisModel, approvals: { ttlHours, maxTtlHours, maxPending, maxProposalsPerRun, defaultProposalsPerRun } }, analysis: { defaultModel, artifactThresholdChars } }` (`tasks.analysisModel` null when tasks or analysis are off) |
+| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds, analysisModel, approvals: { ttlHours, maxTtlHours, maxPending, maxProposalsPerRun, defaultProposalsPerRun }, triggers: { enabled, minIntervalMinutes, maxPerProfile, maxRunsPerDay } }, analysis: { defaultModel, artifactThresholdChars } }` (`tasks.analysisModel` null when tasks or analysis are off) |
 | `/api/profile/*`, `/api/tasks/*` | see [Server mode](#server-mode-profiles-and-scheduled-tasks) | `404 SERVER_MODE_DISABLED` in browser-only mode |
 | `GET /health` | none | `smartermail-agent ok` |
 
@@ -875,6 +878,83 @@ Row codes: `PROPOSAL_UNREADABLE`, `TOOL_NO_LONGER_ALLOWED`, `ACCOUNT_NOT_IN_TASK
 (passkey yes/no), denied, executed (proposal id, tool, role, duration, isError, code), expired and
 interrupted counts; never arguments, hash, note, results, handles or task names.
 
+### Condition-triggered tasks
+
+`Tasks/Triggers/`, `Controllers/TriggersController.cs`, `js/triggers.js`. A task is either cron
+(`TaskDefinition.Trigger` null) or condition (`Trigger` set, `Cron` empty), never both. The probe and
+the predicate run **without an LLM**; firing either starts the task's normal run (same `TaskRunner`,
+`ToolGate`, allowlist, approvals) with the evidence as a seed, or mails an alert. Off with
+`TRIGGERS_ENABLED=false`, and wherever scheduled tasks are off.
+
+- **Definition** (`TaskTrigger`, sealed inside the task definition): `probe { accountId, tool,
+  arguments }` (a read tool with the `ReadOnly` mark, the account's role allows it, a delegated task
+  account; arguments an object ≤ 4 KB with the schema's required properties, never `account` /
+  `approvalNote`), `everyMinutes` (`TRIGGER_MIN_INTERVAL_MINUTES`–1440), `when` (predicate), `fire`
+  `edge|level`, `holdFor` 1–10, `cooldownMinutes` (≥ every; 0 = every), `action` `run|alert`,
+  `activeHours` (optional five-field cron in the task zone). `alert` needs `EmailAccountId`; no
+  prompt, model or task key.
+- **Predicate** (`Predicate.cs`, `JsonPath.cs`): JSON parsed once to an AST, no code. Paths: optional
+  `$`, `.name`, `["name"]`, `[n]`, `[*]` (array elements or object values); relative to the result at
+  the top, to the item inside `where` / `key`; a missing path is "no value". Nodes: `{path, op,
+  value}` with `eq ne gt gte lt lte` (ordering needs two numbers; eq/ne also strings (ordinal),
+  booleans, null; a type mismatch is false both ways), `contains startsWith endsWith`
+  (case-insensitive, strings only), `matches` (`NonBacktracking|IgnoreCase|CultureInvariant`, 50 ms;
+  timeout = false + a warning), `daysUntilLt daysUntilGt daysAgoLt daysAgoGt` (ISO-8601 / RFC 1123, no
+  offset = UTC), `exists`; `{count:{items, where?}, op, value}`; `{new:{items, key?, where?}}` (key =
+  the `key` path(s), else id/uid/messageId/guid, else a date field + a subject-like field, else the
+  whole item); `all` / `any` (no short-circuit) / `not`. Limits: 20 nodes, depth 6, 8 segments, regex
+  200, 8 KB, a work budget (`PREDICATE_LIMIT`). Parse errors name the node (`when.all[1].value: …`).
+  Evidence: the values / items that made it true as `{path, value}`, ≤ 20, each ≤ 2 KB, ≤ 16 KB.
+- **Probe result**: `ToolInvoker.Flatten`, JSON ≤ 1 MB, depth 64. An error, `success:false` or
+  non-JSON is a probe failure, never "false".
+- **State** (`tasks.trigger_state`, `DATA_KEY`, label `sma-task-trigger-state-v1`, context
+  `profileId|taskId`): `{ v, baselined, seen (12-byte SHA-256 key hashes, newest 500), consecutiveTrue,
+  lastValue, latched, lastFiredAt, skippedFires }`. Every save resets it; the first probe only
+  baselines (an edge already true waits for false). `new` fires on matching unseen keys. Edge fires
+  once per true streak after `holdFor`; level on every true probe outside the cooldown. Cooldown and
+  "task already running" leave new matches unseen (they fire later); the daily cap skips but
+  advances. Logic: `TriggerLogic.Decide` (pure).
+- **Prober** (`TriggerProber`, hosted, single replica): 30 s tick; claims `next_probe_at <= now` with
+  a conditional `UPDATE` (every ± 10 %); outside `activeHours` moves to the window's next start. Per
+  mail server a token bucket (`ProbeHostBucket`, keyed like `HostLoginThrottle`,
+  `PROBES_PER_HOST_PER_MINUTE`); empty = retry next tick. `TRIGGER_CONCURRENCY` probes, 30 s each. The
+  read goes through `ToolDispatcher` on a `ProbeToolContext` whose `ToolGate` has an empty allowlist:
+  a tampered definition naming a write is refused by the dispatcher (and `ProbeRunner` refuses a
+  non-read first). Intervals < 15 min keep a task lease on the profile runtime (released by
+  `ReconcileLeasesAsync` when the task is disabled, deleted or slowed).
+- **Firing**: at most `TRIGGER_MAX_RUNS_PER_DAY` real `condition` runs per task per rolling 24 h.
+  `run`: `TaskRunScheduler.StartTriggered` → `TaskRunner.RunAsync(seed)`. The evidence is **never**
+  prompt text: `AgentLoop` seeds a synthetic assistant call of the probe tool and its tool message
+  `{ trigger, conditionMet, matched, truncated }`; the transcript marks that step `seed`.
+  `TriggerPrompt` adds "Why this run started" from the definition only. `alert`: subject
+  `[SmarterMail Agent] <name>: condition met`, plain text (time, predicate, ≤ 20 items as `field:
+  value` ≤ 200 chars, control / bidi characters stripped, fixed footer, no links), `send_email` from
+  the delivery account to itself through the dispatcher; a run row (`condition`, no tokens) with a
+  transcript sealed to the profile key holding the evidence.
+- **Failures**: probes write no run rows; `probe_failures` counts; hard codes (account codes,
+  `PREDICATE_UNREADABLE`, `PROBE_INVALID`) pause at once, 5 soft ones in a row pause; a pause writes
+  one failed run with the code. Alert `EMAIL_FAILED` counts toward the usual 3-in-a-row pause.
+- **Run now / Test run** on a condition task probes once, evaluates against the stored `seen` without
+  advancing it, and runs with that seed, or mails / records the alert (test run: nothing mailed).
+
+| Method & path | Body → Response |
+|---|---|
+| `POST /api/tasks`, `PUT /api/tasks/{id}` | `TaskRequest.trigger` (shape above); `cron` ignored when set. `400 TASK_INVALID` (predicate errors prefixed `Condition: when…`), `409 TRIGGER_LIMIT` at `TRIGGERS_PER_PROFILE` (inside `TASKS_PER_PROFILE`) |
+| `POST /api/tasks/probe` | `api` limiter, unlocked profile session. `{ accountId, tool, arguments, when? }` → `200 { result (≤ 60,000), json, truncated, isError, code, evaluation: { value, matched, truncated, errors, description } \| null }`, as the session's live account; no state, every item counts as new. `400 PROBE_INVALID`, `404 ACCOUNT_NOT_LIVE`, `409 PROFILE_LOCKED`, `429 PROBE_THROTTLED`, `404 TRIGGERS_DISABLED` |
+| `GET /api/tasks` | `TaskView.trigger: { nextProbeAt, lastProbeAt, lastValue, probeFailures, firesToday } \| null`; condition tasks have `nextRunAt: null` |
+| `POST /api/tasks/{id}/run` | condition task: `202 { runId }`; `409 TASK_RUNNING`, `429 PROBE_THROTTLED`, `502 PROBE_FAILED / PROBE_NOT_JSON / ACCOUNT_UNAVAILABLE` |
+
+Run `trigger` values: `schedule`, `manual`, `condition`. Failure codes: `PROBE_FAILED`,
+`PROBE_NOT_JSON`, `PROBE_INVALID` (hard), `PREDICATE_UNREADABLE` (hard), `PREDICATE_LIMIT`,
+`TRIGGER_STATE_UNREADABLE` (logged, re-baseline, no pause), `EMAIL_FAILED`, plus the account codes.
+Migration 4: `tasks.next_probe_at` (non-NULL exactly for condition tasks), `last_probe_at`,
+`last_value`, `probe_failures`, `trigger_state`. Logged: probe task id, true/false or failure code,
+outcome (`baseline`, `false`, `hold`, `latched`, `cooldown`, `fired`, `skipped: …`), duration,
+host-bucket deferrals, lease releases, alert outcome; never arguments, results, evidence, predicate
+values or seen keys. The result shapes of `get_spool_message_counts`, `get_ssl_certificates` and
+`get_throttled_users` are not yet checked against a live server; the editor's presets `any` across
+likely field names.
+
 ### Prompt caching and context size
 
 Same rules in the browser (`llm.js` `buildRequestBody`) and for scheduled runs
@@ -1126,6 +1206,7 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 | `TASK_ANALYSIS_MODEL` | `ANALYSIS_MODEL` | analysis model for scheduled runs; `off`/`none` = results clamped as before |
 | `APPROVAL_MAX_PENDING` | `100` | pending approval proposals per profile |
 | `TASK_MAX_PROPOSALS` | `50` | highest per-run proposal limit a task may set |
+| `TRIGGERS_ENABLED` (true), `TRIGGER_MIN_INTERVAL_MINUTES` (5), `TRIGGERS_PER_PROFILE` (5), `TRIGGER_MAX_RUNS_PER_DAY` (24), `TRIGGER_CONCURRENCY` (4), `PROBES_PER_HOST_PER_MINUTE` (30) | | condition-triggered tasks |
 | `PATH_BASE` | `/` | path prefix, e.g. `/mail-agent` when a reverse proxy serves it under one |
 | `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` / `-Proto` are believed. Unset = forwarded headers ignored; limits key off the TCP peer. A malformed entry fails startup |
 | `TRUST_CF_CONNECTING_IP` | `false` | key rate limits off `CF-Connecting-IP`, only when the TCP peer is a trusted proxy |
