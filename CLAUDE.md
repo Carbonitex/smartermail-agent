@@ -397,7 +397,7 @@ whose resume version is newer, carries `X-Resume-Version: <newer>`; the browser 
 | `GET /api/tools` | session | `200 [ { name, description, inputSchema, category, scope, write, destructive } ]` — only tools with at least one eligible account; `inputSchema` carries the injected `account` property (below) |
 | `POST /api/tools/call` | session, `api` limiter (120/min/IP) | `{ name, arguments: {…, account?} }` → `200 { isError, content, account }` (`account` = the handle it ran as, `null` if refused before resolving). Tool exceptions **and payloads carrying `success:false`** → `isError: true`. Missing / unknown / wrong-role `account` → `200 isError` listing the valid handles. Write tool on a read-only account → `403 { error }` naming the handle. Unknown tool → `404`. |
 | `POST /mcp` | session cookie **or** `Authorization: Bearer <MCP token>` (`401` + `WWW-Authenticate: Bearer` for a bad/expired/revoked token or a raw session id) | Stateless MCP, same per-session tool list and schemas, same dispatcher. Account and read-only refusals are `isError: true`; tool results pass through unchanged. |
-| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds } }` |
+| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds, analysisModel }, analysis: { defaultModel, artifactThresholdChars } }` (`tasks.analysisModel` null when tasks or analysis are off) |
 | `/api/profile/*`, `/api/tasks/*` | see [Server mode](#server-mode-profiles-and-scheduled-tasks) | `404 SERVER_MODE_DISABLED` in browser-only mode |
 | `GET /health` | none | `smartermail-agent ok` |
 
@@ -811,6 +811,8 @@ same login reuses the row id (`RowForLogin`), which tasks refer to.
 - **History**: `TaskStore.PreviousRuns` gives `TaskPrompt` the start of the last non-test `ok` run and
   the latest non-test run if it failed after that; test runs and running runs never count, "Run now"
   does. The runs list shows prompt / completion tokens.
+- `ProfileMaintenance` refreshes delegated accounts untouched for 20 hours once a day, so a weekly
+  task still finds a live token, and deletes profiles idle for `PROFILE_IDLE_DAYS`.
 
 ### Prompt caching and context size
 
@@ -834,8 +836,45 @@ Same rules in the browser (`llm.js` `buildRequestBody`) and for scheduled runs
 - Usage (`prompt_tokens_details.cached_tokens`, `cache_write_tokens`, `cost`) is summed per turn
   (`runTurn` → `usage`, `ui.onUsage`, `state.usage`) and per run (`AgentLoop.Result`). Not yet shown in
   the chat UI.
-- `ProfileMaintenance` refreshes delegated accounts untouched for 20 hours once a day, so a weekly
-  task still finds a live token, and deletes profiles idle for `PROFILE_IDLE_DAYS`.
+
+### Large results: artifacts and analyze_result
+
+A tool result over 20,000 characters (`ARTIFACT_THRESHOLD`; not errors) is kept as an **artifact**
+(`r1`, `r2`, …) and the model gets a **stub**: one line of JSON, keys in a fixed order — `artifact`,
+`tool`, `kind` (`text`|`records`), `chars`, `lines`|`records`, `field`, `truncated`, `meta` (the
+result's small fields), `head` (≤ 30 lines / 2,500 chars), `tail` (≤ 10 / 800), `note`. A JSON
+object whose bulk is one string (search_log_files' `content`) is unwrapped to that text; one whose
+bulk is one array (or a bare array) to records. `elideOldToolResults` never touches a stub.
+
+`analyze_result(artifact, question)` hands the artifact to a second model (`openai/gpt-6-luna`,
+`reasoning: { effort: "low" }`). Artifact ≤ 200k chars and a question that does not ask for counts
+(`wantsExactAnswer`): one request with the whole artifact, no tools. Otherwise the sub-agent gets
+only the operators (`artifact_between/count/fields/grep/info/session/slice`), at most 8 rounds and
+400k prompt tokens per call, then one last request with `tool_choice: "none"`. Its answer goes back
+with `[analysis of artifact rN by <model>: …; partial: …]`. No SmarterMail tool, no write, and no
+code execution anywhere (an MXC-style sandbox was considered and rejected: on Linux its only limit
+is a timeout, and it needs a weakened seccomp/AppArmor profile on the process holding everyone's
+tokens).
+
+- Browser (`js/artifacts.js`, `js/artifact-ops.js`, `js/artifact-worker.js`, `js/subagent.js`):
+  artifacts in the tab's memory only (LRU, 64 MB total, 16 MB each), never storage, never the
+  server. analyze_result is a `localTools` entry of `runTurn` — it never reaches /api/tools/call —
+  and runs with the user's key. Operators run in a module Worker
+  (`new URL('./artifact-worker.js', import.meta.url)`, so under `/v/{version}/js/`), terminated
+  after 3 s. `analyze_result` is appended last to the tools while the Tools menu's "Large results"
+  switch is on (always, so the prefix stays byte-stable); the system prompt gains "# Large
+  results". Settings: sessionStorage `analysisOff` / `analysisModel`, and `analysis` /
+  `analysisModel` in the profile settings blob. Cards: an artifact badge, a Blob download under the
+  details, the sub-agent's calls, tokens and cost.
+- Scheduled runs (`Llm/Artifacts/`): `AgentLoop.RunAsync(..., analysis)` when
+  `TASK_ANALYSIS_MODEL` is set. Same stub and operators (C#: `RegexOptions.NonBacktracking`,
+  250 ms match timeout), byte-identical to the browser's on
+  `tests/Agent.Tests/Fixtures/artifact-ops.json` (regenerate with
+  `UPDATE_ARTIFACT_FIXTURE=1 node --test src/Agent/wwwroot/dev/test/artifact-ops.test.mjs`).
+  Artifacts in RAM for the run (32 MB), never in the transcript (it gets the stub and
+  `analyze_result: <op>` steps). Per run: 15 calls, 1M analysis prompt tokens, billed to the task
+  key; counted in the run's tokens. Logs: tool, artifact size, mode, rounds, calls, tokens, ms —
+  never the question, a pattern or output. One server-wide model for tasks (no per-task choice yet).
 
 ## Tool scopes and read-only
 
@@ -982,7 +1021,7 @@ password, secret, token, API-key, credential and private-key string fields redac
 (`src/Core/SecretRedactor.cs`, shared; a DKIM *public* key is kept). `get_dkim_settings` returns only
 the DKIM fields of the domain settings, never the raw response.
 
-`search_log_files` returns a window, not the whole log: `maxChars` (default 20,000, cap 100,000),
+`search_log_files` returns a window, not the whole log: `maxChars` (default 16,000, so a page stays under the agent's 20,000-char artifact threshold; cap 100,000),
 `offset`, `tail` (default true: newest first) and an optional `contains` line filter, with
 `totalChars`, `hasMore` and `nextOffset`. The slicing is `src/Core/TextWindow.cs`, for any large
 text result.
@@ -1022,6 +1061,8 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 | `PUBLIC_ORIGIN` | unset | passkey origin / RP id; unset = from the request (passkeys need a host name, not an IP) |
 | `PROFILE_MAIL_HOSTS`, `PROFILE_IDLE_DAYS` (180), `MAX_PROFILES` (1000), `PROFILE_MAX_IDLE_MINUTES` (480) | | profile limits; the last is the longest session idle timeout a profile may choose |
 | `TASKS_ENABLED` (true), `TASK_CONCURRENCY` (2), `TASK_TIMEOUT_MINUTES` (10), `TASK_MAX_TOOL_ROUNDS` (15), `TASK_MIN_INTERVAL_MINUTES` (15), `TASKS_PER_PROFILE` (10), `TASK_RUN_RETENTION` (50), `LLM_BASE_URL` | | scheduled tasks |
+| `ANALYSIS_MODEL` | `openai/gpt-6-luna` | default analysis model offered to the browser (`/api/config`) |
+| `TASK_ANALYSIS_MODEL` | `ANALYSIS_MODEL` | analysis model for scheduled runs; `off`/`none` = results clamped as before |
 | `PATH_BASE` | `/` | path prefix, e.g. `/mail-agent` when a reverse proxy serves it under one |
 | `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` / `-Proto` are believed. Unset = forwarded headers ignored; limits key off the TCP peer. A malformed entry fails startup |
 | `TRUST_CF_CONNECTING_IP` | `false` | key rate limits off `CF-Connecting-IP`, only when the TCP peer is a trusted proxy |

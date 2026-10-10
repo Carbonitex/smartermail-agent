@@ -18,6 +18,11 @@ All notable changes to this project are documented here. The format follows
 - Agent: scheduled runs are told when the previous successful run started (in the task's time zone)
   and whether the latest attempt failed; task results show prompt / completion token counts.
 - Agent: token usage, cached tokens and cost are tracked per chat turn and per scheduled run.
+- Agent: tool results over 20,000 characters become artifacts; the model asks `analyze_result`, which
+  runs a cheaper analysis model (default `openai/gpt-6-luna`) over deterministic search, count and
+  extract operators. Browser: in tab memory, with your key; Tools menu switch and model choice. Tool
+  cards show the analysis calls and cost, plus a download of the full result. Scheduled runs do the
+  same with `TASK_ANALYSIS_MODEL`, billed to the task key. New env `ANALYSIS_MODEL`.
 
 - `upload_attachment` takes the file as `base64Content` or `text` (with `fileName`), so remote
   clients can attach files they have. New `inline=true` embeds an image: SmarterMail assigns the
@@ -34,7 +39,7 @@ All notable changes to this project are documented here. The format follows
 
 - Agent: large tool results from older chat turns are no longer re-sent to the model (the tool cards
   keep them); the model calls the tool again if it needs one.
-- `search_log_files` returns a window (`maxChars`, `offset`, `tail`, optional `contains`) with
+- `search_log_files` returns a window (`maxChars` default 16,000, `offset`, `tail`, optional `contains`) with
   `totalChars`, `hasMore` and `nextOffset`, instead of a whole day's log in one result.
 - Agent: the default model is Claude Haiku 5.5 (`anthropic/claude-haiku-5.5` on OpenRouter).
 - `upload_attachment`'s `contentId` is replaced by `inline`. SmarterMail rejects every content ID

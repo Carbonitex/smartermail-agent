@@ -11,7 +11,7 @@ public sealed record TextWindowResult(
 /// </summary>
 public static class TextWindow
 {
-    public const int DefaultMaxChars = 20_000;
+    public const int DefaultMaxChars = 16_000;
     public const int MaxCharsCap = 100_000;
     public const int MinMaxChars = 200;
 

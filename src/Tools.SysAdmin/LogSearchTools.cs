@@ -16,7 +16,7 @@ public sealed class LogSearchTools
     [McpServerTool(ReadOnly = true)]
     [Description(
         "Search server log files by type, date range, and search term. A busy day of a log can be megabytes, " +
-        "so the result is a WINDOW (maxChars, default 20000): narrow first with a one-day range and a specific " +
+        "so the result is a WINDOW (maxChars, default 16000): narrow first with a one-day range and a specific " +
         "search term (the server filters on it), optionally 'contains' to keep only matching lines, then page. " +
         "The window shows the most recent part first (tail=true); the result reports totalChars, returnedChars, " +
         "hasMore and nextOffset - call again with offset=nextOffset to read further back (tail=true) or forward (tail=false). " +
@@ -32,7 +32,7 @@ public sealed class LogSearchTools
         [Description("Search term the server uses to filter log entries (empty string returns all entries - avoid for busy logs)")] string search,
         [Description("Include related log entries (useful for tracking a message through multiple log types)")] bool related,
         UserContext userContext,
-        [Description("Maximum characters to return (default 20000, capped at 100000).")] int maxChars = TextWindow.DefaultMaxChars,
+        [Description("Maximum characters to return (default 16000, capped at 100000).")] int maxChars = TextWindow.DefaultMaxChars,
         [Description("Window offset in characters. With tail=true it counts back from the end of the log; with tail=false from the start. Use nextOffset from the previous result. Default 0.")] int offset = 0,
         [Description("true (default): return the most recent part of the log first. false: start from the beginning.")] bool tail = true,
         [Description("Optional extra filter: keep only lines containing this text (case-insensitive), applied before windowing. The result reports matchedLines of totalLines.")] string? contains = null)
