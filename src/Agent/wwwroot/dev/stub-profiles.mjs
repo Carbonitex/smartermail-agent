@@ -39,9 +39,12 @@ export function config(resumeEnabled, resumeDays) {
     resume: { enabled: resumeEnabled, days: resumeEnabled ? resumeDays : 0 },
     profiles: { enabled: MODE === 'server' },
     tasks: {
-      enabled: MODE === 'server' && TASKS, minIntervalMinutes: 15, maxPerProfile: 10, maxToolRounds: 15, approvals: APPROVALS,
+      enabled: MODE === 'server' && TASKS, minIntervalMinutes: 15, maxPerProfile: 10, maxToolRounds: 15,
+      analysisModel: MODE === 'server' && TASKS ? 'openai/gpt-6-luna' : null,
+      approvals: APPROVALS,
       triggers: { enabled: MODE === 'server' && TRIGGERS, minIntervalMinutes: TRIGGER_MIN, maxPerProfile: TRIGGERS_PER_PROFILE, maxRunsPerDay: 24 }
-    }
+    },
+    analysis: { defaultModel: 'openai/gpt-6-luna', artifactThresholdChars: 20000 }
   };
 }
 
