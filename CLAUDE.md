@@ -397,7 +397,7 @@ whose resume version is newer, carries `X-Resume-Version: <newer>`; the browser 
 | `GET /api/tools` | session | `200 [ { name, description, inputSchema, category, scope, write, destructive } ]` — only tools with at least one eligible account; `inputSchema` carries the injected `account` property (below) |
 | `POST /api/tools/call` | session, `api` limiter (120/min/IP) | `{ name, arguments: {…, account?} }` → `200 { isError, content, account }` (`account` = the handle it ran as, `null` if refused before resolving). Tool exceptions **and payloads carrying `success:false`** → `isError: true`. Missing / unknown / wrong-role `account` → `200 isError` listing the valid handles. Write tool on a read-only account → `403 { error }` naming the handle. Unknown tool → `404`. |
 | `POST /mcp` | session cookie **or** `Authorization: Bearer <MCP token>` (`401` + `WWW-Authenticate: Bearer` for a bad/expired/revoked token or a raw session id) | Stateless MCP, same per-session tool list and schemas, same dispatcher. Account and read-only refusals are `isError: true`; tool results pass through unchanged. |
-| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds, analysisModel }, analysis: { defaultModel, artifactThresholdChars } }` (`tasks.analysisModel` null when tasks or analysis are off) |
+| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds, analysisModel, approvals: { ttlHours, maxTtlHours, maxPending, maxProposalsPerRun, defaultProposalsPerRun } }, analysis: { defaultModel, artifactThresholdChars } }` (`tasks.analysisModel` null when tasks or analysis are off) |
 | `/api/profile/*`, `/api/tasks/*` | see [Server mode](#server-mode-profiles-and-scheduled-tasks) | `404 SERVER_MODE_DISABLED` in browser-only mode |
 | `GET /health` | none | `smartermail-agent ok` |
 
@@ -814,6 +814,67 @@ same login reuses the row id (`RowForLogin`), which tasks refer to.
 - `ProfileMaintenance` refreshes delegated accounts untouched for 20 hours once a day, so a weekly
   task still finds a live token, and deletes profiles idle for `PROFILE_IDLE_DAYS`.
 
+### Approval queue
+
+A task's allowed writes may each be **auto** (the run makes the change) or **approve** (the run only
+proposes it). `TaskDefinition.Approvals` (null on older tasks: none) = `{ writes ⊆ allowedWrites,
+maxProposals (default 10, 0..TASK_MAX_PROPOSALS), requirePasskey, ttlHours (default 72, 1..168) }`.
+The server forces approval on nothing; the editor pre-selects it for destructive and `DomainAdmin` /
+`SysAdmin` tools. Code: `Tasks/Approvals/`, `Storage/ProposalStore.cs`, `Controllers/ApprovalsController.cs`,
+`js/approvals-core.js`, `js/approvals.js`.
+
+- **Gate** (`ToolGate`): not allowed → `NotAllowed`; an approval write → its own per-run budget, then
+  `DryRun` (a test run never proposes) or `Propose`, never consuming `MaxWrites`; otherwise as before.
+  On `Propose` the dispatcher hands the call to the run's `TaskProposalSink`; the model gets
+  `{ queued, proposalId, note }` and the transcript step carries `proposalId`. `approvalNote` (≤ 500,
+  untrusted) is offered only on approval tools and stripped from every task call.
+- **Hash** (`ProposalHash.cs`): canonical `argsJson` (keys sorted ordinal, recursively; no whitespace;
+  values as their raw text). `argsHash = base64url(SHA-256("sma-proposal-v1\n" + tool + "\n" +
+  accountId + "\n" + argsJson))`. The browser hashes the string it displays (`js/approvals-core.js`);
+  `dev/test/vectors/proposal-hash.json` pins both. Over 64 KB or a duplicate key: not queued (`isError`).
+- **Storage** (`task_proposals`, migration 3): `payload` sealed with `DATA_KEY` (`sma-task-proposal-v1`,
+  `profileId|id`) and NULL at every terminal state; `display` and `result` sealed to the profile public
+  key (`task-proposal|profileId|id`, `task-proposal-result|profileId|id`). In clear: status, timestamps,
+  `needs_passkey`, `dedupe` = HMAC(HKDF(DATA_KEY, `sma-proposal-dedupe-v1`), `profileId|taskId|argsHash`):
+  the same pending call for the same task is queued once. At `APPROVAL_MAX_PENDING` the model is told
+  the queue is full.
+- **Executor** (`ProposalExecutor`, 60 s): claim (`pending → executing`, one UPDATE) → open payload →
+  compare hash (mismatch: back to pending) → re-check the current task (tool allowed, account in task)
+  → account live (server down before the call: back to pending, 503) → dispatch under
+  `ToolGate.Approved` (exactly one call with that tool, account and hash) → `executed` / `failed`,
+  result sealed, payload erased. Startup: `executing → unknown` (`INTERRUPTED`), never retried. Every
+  30 s: expired pending → `expired`.
+- **Step-up**: `needs_passkey = destructive || scope ∈ {DomainAdmin, SysAdmin} || requirePasskey`.
+  `PasskeyService.BeginStepUp` / `CompleteStepUpAsync`: allow-list = the profile's passkeys, UV
+  required, binding `SHA-256(sessionId)|proposalId|argsHash` held server-side, the passkey must belong
+  to the profile, counter advanced. A step-up ceremony never completes a sign-in. Direct chat and
+  `/mcp` calls get no step-up.
+- **Email**: a run that queued proposals and has `EmailAccountId` adds a fixed footer to its report
+  (count, first expiry, `PUBLIC_ORIGIN`+`PATH_BASE`); no arguments, no approve links.
+
+`ProposalView` = `{ id, taskId, runId, status, needsPasskey, createdAt, expiresAt, decidedAt,
+executedAt, errorCode, errorMessage, read, display, result }`; a pending proposal past `expiresAt`
+reads as `expired`. All endpoints are cookie-only on the session's own profile (an MCP token is
+refused at authorization, `401`); deciding needs the profile unlocked (`409 PROFILE_LOCKED`).
+
+| Method & path | Body → Response |
+|---|---|
+| `GET /api/tasks` | adds `pending` |
+| `GET /api/tasks/proposals?status=pending\|decided\|all&taskId=&limit=` | `200 [ProposalView]`, newest first (default `pending`, limit 1–200, 50) |
+| `GET /api/tasks/proposals/{id}` | `200 ProposalView`; `404 PROPOSAL_NOT_FOUND` |
+| `POST /api/tasks/proposals/{id}/approve/options` | `two-factor` limiter. `{ argsHash }` → `200 { passkey: false }` or `{ passkey: true, ceremonyId, options }`. `400` malformed hash, `409 PROPOSAL_NOT_PENDING`, `410 PROPOSAL_EXPIRED` |
+| `POST /api/tasks/proposals/{id}/approve` | `api` limiter. `{ argsHash, ceremonyId?, credential? }` → `200 { status: executed\|failed\|unknown, errorCode, errorMessage, result }`. `401 PASSKEY_REQUIRED` / `PASSKEY_INVALID`, `409 PROPOSAL_MISMATCH` (still pending) / `PROPOSAL_NOT_PENDING`, `410 PROPOSAL_EXPIRED`, `503 ACCOUNT_UNAVAILABLE` (still pending) |
+| `POST /api/tasks/proposals/{id}/deny` | `204`; `409 PROPOSAL_NOT_PENDING` |
+| `POST /api/tasks/proposals/deny` | `{ runId }` → `200 { denied }` |
+| `POST /api/tasks/proposals/{id}/read` | `204` |
+
+Row codes: `PROPOSAL_UNREADABLE`, `TOOL_NO_LONGER_ALLOWED`, `ACCOUNT_NOT_IN_TASK`, `ACCOUNT_READ_ONLY`,
+`ACCOUNT_ROLE_CHANGED`, `NEEDS_SIGN_IN` / `ACCOUNT_REMOVED` / `ACCOUNT_NOT_DELEGATED` /
+`ACCOUNT_UNREADABLE` (as `TaskRunner.Explain`), `TOOL_ERROR`, `INTERRUPTED` / `TIMEOUT` / `ERROR`
+(status `unknown`). Logged: proposal created / deduped (task id, proposal id), queue full, approved
+(passkey yes/no), denied, executed (proposal id, tool, role, duration, isError, code), expired and
+interrupted counts; never arguments, hash, note, results, handles or task names.
+
 ### Prompt caching and context size
 
 Same rules in the browser (`llm.js` `buildRequestBody`) and for scheduled runs
@@ -1063,6 +1124,8 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 | `TASKS_ENABLED` (true), `TASK_CONCURRENCY` (2), `TASK_TIMEOUT_MINUTES` (10), `TASK_MAX_TOOL_ROUNDS` (15), `TASK_MIN_INTERVAL_MINUTES` (15), `TASKS_PER_PROFILE` (10), `TASK_RUN_RETENTION` (50), `LLM_BASE_URL` | | scheduled tasks |
 | `ANALYSIS_MODEL` | `openai/gpt-6-luna` | default analysis model offered to the browser (`/api/config`) |
 | `TASK_ANALYSIS_MODEL` | `ANALYSIS_MODEL` | analysis model for scheduled runs; `off`/`none` = results clamped as before |
+| `APPROVAL_MAX_PENDING` | `100` | pending approval proposals per profile |
+| `TASK_MAX_PROPOSALS` | `50` | highest per-run proposal limit a task may set |
 | `PATH_BASE` | `/` | path prefix, e.g. `/mail-agent` when a reverse proxy serves it under one |
 | `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` / `-Proto` are believed. Unset = forwarded headers ignored; limits key off the TCP peer. A malformed entry fails startup |
 | `TRUST_CF_CONNECTING_IP` | `false` | key rate limits off `CF-Connecting-IP`, only when the TCP peer is a trusted proxy |

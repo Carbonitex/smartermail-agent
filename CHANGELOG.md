@@ -23,6 +23,12 @@ All notable changes to this project are documented here. The format follows
   extract operators. Browser: in tab memory, with your key; Tools menu switch and model choice. Tool
   cards show the analysis calls and cost, plus a download of the full result. Scheduled runs do the
   same with `TASK_ANALYSIS_MODEL`, billed to the task key. New env `ANALYSIS_MODEL`.
+- Agent: scheduled tasks can ask before changing anything. Mark an allowed change "asks me first"
+  and the run only proposes the exact call; review it under Tasks → To approve (arguments shown
+  verbatim), then approve to run it once, or deny. Proposals expire (per task, 72 h by default, up to
+  7 days). Approving a destructive or admin change asks for your passkey, bound to that exact change.
+  The emailed report says how many changes are waiting, never what they are. New env
+  `APPROVAL_MAX_PENDING` (100), `TASK_MAX_PROPOSALS` (50).
 
 - `upload_attachment` takes the file as `base64Content` or `text` (with `fileName`), so remote
   clients can attach files they have. New `inline=true` embeds an image: SmarterMail assigns the
