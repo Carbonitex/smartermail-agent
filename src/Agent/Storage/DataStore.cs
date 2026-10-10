@@ -139,6 +139,24 @@ public sealed class DataStore
         CREATE INDEX tasks_probe ON tasks(enabled, next_probe_at);
         CREATE INDEX task_runs_trigger ON task_runs(task_id, trigger, started_at);
         """,
+
+        // 5: invite-only scheduled tasks (TASKS_ACCESS=invite). Only the code's SHA-256 is stored; note is
+        // the operator's own label. profiles.task_access_at is set when a profile redeems a code or the
+        // operator grants access, NULL otherwise; task_invite_id says which code (NULL = granted).
+        """
+        CREATE TABLE task_invites (
+            id          TEXT PRIMARY KEY,
+            code_hash   TEXT NOT NULL UNIQUE,
+            note        TEXT,
+            max_uses    INTEGER NOT NULL,
+            uses        INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL,
+            expires_at  INTEGER,
+            revoked_at  INTEGER
+        );
+        ALTER TABLE profiles ADD COLUMN task_access_at INTEGER;
+        ALTER TABLE profiles ADD COLUMN task_invite_id TEXT;
+        """,
     ];
 
     public DataStore(ServerOptions options, ILogger<DataStore> logger)

@@ -191,6 +191,8 @@ public sealed class TaskRunner(
         var profile = profiles.GetProfile(task.ProfileId);
         if (profile is null)
             return (null, null, "PROFILE_GONE");
+        if (!options.AllowsTasks(profile))
+            return (null, profile, TaskInviteStore.NotInvitedCode);
         var definition = TaskDefinition.Open(sealer, task.ProfileId, task.Id, task.Definition);
         return definition is null ? (null, profile, "DEFINITION_UNREADABLE") : (definition, profile, null);
     }
@@ -306,6 +308,7 @@ public sealed class TaskRunner(
         "ACCOUNT_UNAVAILABLE" => "One of the task's mail servers did not answer.",
         "ACCOUNT_UNREADABLE" => "One of the task's accounts could not be opened with this server's key (DATA_KEY changed?).",
         "TASKS_DISABLED" => "Scheduled tasks are switched off on this server.",
+        TaskInviteStore.NotInvitedCode => "This profile no longer has access to scheduled tasks on this server (they are by invitation).",
         "DEFINITION_UNREADABLE" => "The task could not be opened with this server's key (DATA_KEY changed?).",
         "LLM_KEY_REJECTED" => "OpenRouter rejected the key saved for scheduled tasks.",
         "NO_CREDITS" => "The OpenRouter account for scheduled tasks is out of credits.",

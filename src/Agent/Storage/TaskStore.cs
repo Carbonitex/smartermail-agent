@@ -116,7 +116,7 @@ public sealed class TaskStore(DataStore db)
     public static readonly IReadOnlySet<string> HardFailures = new HashSet<string>(StringComparer.Ordinal)
     {
         "NEEDS_SIGN_IN", "LLM_KEY_REJECTED", "NO_TASK_KEY", "NO_CREDITS", "ACCOUNT_REMOVED", "ACCOUNT_NOT_DELEGATED",
-        "ACCOUNT_UNREADABLE", "DEFINITION_UNREADABLE", "PROFILE_GONE",
+        "ACCOUNT_UNREADABLE", "DEFINITION_UNREADABLE", "PROFILE_GONE", TaskInviteStore.NotInvitedCode,
     };
 
     /// <summary>Records how a run went; three failures in a row, or one hard failure, pause the task (<c>status</c> says why).</summary>

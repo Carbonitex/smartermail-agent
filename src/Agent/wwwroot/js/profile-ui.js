@@ -227,6 +227,39 @@ export async function loadView() {
 
 export const currentView = () => view;
 
+/** Whether this profile still needs an invite code before it can use scheduled tasks. */
+export const needsTaskInvite = (v) => !!(v?.tasksEnabled && v.taskAccess?.inviteOnly && !v.taskAccess.granted);
+
+/**
+ * The invite-code box (Profile menu and Tasks dialog): a code from the server's operator opens
+ * scheduled tasks for this profile. <code>onGranted(view)</code> gets the new profile view.
+ */
+export function inviteForm(onGranted) {
+  const box = document.createElement('div');
+  const hint = para('Scheduled tasks on this server are by invitation. If the person running it gave you an invite code, enter it here.');
+  const row = document.createElement('div');
+  row.className = 'profile-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'XXXX-XXXX-XXXX-XXXX';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.maxLength = 64;
+  input.className = 'profile-input';
+  input.setAttribute('aria-label', 'Invite code');
+  const redeem = button('Redeem', (b) => busy(b, async () => {
+    if (!input.value.trim()) return;
+    view = await api.redeemTaskInvite(input.value.trim());
+    input.value = '';
+    hooks.notice('Scheduled tasks are open for this profile.', 'info');
+    onGranted(view);
+  }), true);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') redeem.click(); });
+  row.append(input, redeem);
+  box.append(hint, row);
+  return box;
+}
+
 async function refreshView() {
   renderPopover();
   await loadView();
@@ -331,7 +364,10 @@ function renderPopover() {
   }
 
   // Scheduled tasks
-  if (view.tasksEnabled) {
+  if (needsTaskInvite(view)) {
+    add(section('Scheduled tasks'));
+    add(inviteForm(() => renderPopover()));
+  } else if (view.tasksEnabled) {
     add(section('Scheduled tasks'));
     add(para(view.hasTaskKey
       ? 'An OpenRouter key for tasks is saved (sealed with this server\'s key).'

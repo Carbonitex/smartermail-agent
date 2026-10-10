@@ -10,7 +10,8 @@ namespace SmarterMailAgent.Profiles;
 ///   <item>profiles nobody opened for <c>PROFILE_IDLE_DAYS</c> are deleted (their delegated
 ///   accounts, the only ones the server can open alone, are revoked first);</item>
 ///   <item>delegated accounts untouched for a day are refreshed, so a task that runs weekly still
-///   finds a live refresh token. The rotated token is saved like any other.</item>
+///   finds a live refresh token. The rotated token is saved like any other. Profiles without task
+///   access (<c>TASKS_ACCESS=invite</c>) are skipped.</item>
 /// </list>
 /// </summary>
 public sealed class ProfileMaintenance(
@@ -77,6 +78,11 @@ public sealed class ProfileMaintenance(
         var stale = DateTimeOffset.UtcNow.Add(-KeepAliveAge).ToUnixTimeMilliseconds();
         foreach (var profileId in store.ProfilesWithDelegatedAccounts(stale))
         {
+            // Without task access (TASKS_ACCESS=invite) nothing keeps its delegated accounts alive: they
+            // wait for the owner's next unlock, which moves them back under the profile key.
+            if (store.GetProfile(profileId) is not { } profile || !options.AllowsTasks(profile))
+                continue;
+
             var runtime = registry.AcquireTask(profileId);
             try
             {

@@ -21,8 +21,9 @@ public sealed class ConfigController(ServerOptions options, ResumeSealer sealer,
     public sealed record ProfilesConfig(bool Enabled);
 
     /// <param name="AnalysisModel">The model scheduled runs hand large results to (TASK_ANALYSIS_MODEL); null = off.</param>
+    /// <param name="InviteOnly">TASKS_ACCESS=invite: a profile needs an invite code first.</param>
     public sealed record TasksConfig(bool Enabled, int MinIntervalMinutes, int MaxPerProfile, int MaxToolRounds,
-        string? AnalysisModel = null, ApprovalsConfig? Approvals = null, TriggersConfig? Triggers = null);
+        string? AnalysisModel = null, ApprovalsConfig? Approvals = null, TriggersConfig? Triggers = null, bool InviteOnly = false);
 
     /// <summary>Large tool results in the browser: the default analysis model and the size that makes an artifact.</summary>
     public sealed record AnalysisConfig(string DefaultModel, int ArtifactThresholdChars);
@@ -45,6 +46,7 @@ public sealed class ConfigController(ServerOptions options, ResumeSealer sealer,
             options.TaskMaxToolRounds, options.TasksEnabled ? options.TaskAnalysisModel : null,
             new ApprovalsConfig(Tasks.Approvals.TaskApprovals.DefaultTtlHours, Tasks.Approvals.TaskApprovals.MaxTtlHours,
                 options.ApprovalMaxPending, options.TaskMaxProposals, Tasks.Approvals.TaskApprovals.DefaultMaxProposals),
-            new TriggersConfig(triggers.Enabled, triggers.MinIntervalMinutes, triggers.PerProfile, triggers.MaxRunsPerDay)),
+            new TriggersConfig(triggers.Enabled, triggers.MinIntervalMinutes, triggers.PerProfile, triggers.MaxRunsPerDay),
+            options.TasksEnabled && options.TaskInviteOnly),
         new AnalysisConfig(options.AnalysisModel, ArtifactStore.DefaultThreshold)));
 }

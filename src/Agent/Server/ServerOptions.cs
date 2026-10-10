@@ -1,4 +1,5 @@
 using SmarterMailAgent.Auth;
+using SmarterMailAgent.Storage;
 
 namespace SmarterMailAgent.Server;
 
@@ -63,6 +64,16 @@ public sealed record ServerOptions
 
     /// <summary>Scheduled tasks need the server key: they run while nobody is there to unlock anything.</summary>
     public bool TasksEnabled => ServerMode && DataKey is not null && TasksEnabledSetting;
+
+    /// <summary>
+    /// <c>TASKS_ACCESS=invite</c>: scheduled tasks (delegation, the task key, tasks, probes, approvals) only
+    /// for profiles that redeemed an invite code or were granted access by the operator (see
+    /// <c>Server/AdminCli.cs</c>). Default <c>open</c>: every profile may use them.
+    /// </summary>
+    public bool TaskInviteOnly { get; init; }
+
+    /// <summary>Whether <paramref name="profile"/> may use scheduled tasks here (always, unless invite-only).</summary>
+    public bool AllowsTasks(ProfileRow profile) => !TaskInviteOnly || profile.TaskAccessAt is not null;
 
     public int TaskConcurrency { get; init; } = 2;
     public TimeSpan TaskTimeout { get; init; } = TimeSpan.FromMinutes(10);
@@ -131,6 +142,13 @@ public sealed record ServerOptions
             var model => model,
         };
 
+        var inviteOnly = config["TASKS_ACCESS"]?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "open" => false,
+            "invite" => true,
+            _ => throw new InvalidOperationException("TASKS_ACCESS must be open or invite."),
+        };
+
         var options = new ServerOptions
         {
             BrowserOnly = browserOnly,
@@ -146,6 +164,7 @@ public sealed record ServerOptions
             MaxProfiles = Int(config, "MAX_PROFILES", 1000),
             ProfileMaxIdleMinutes = Math.Max(ProfileMinIdleMinutes, Int(config, "PROFILE_MAX_IDLE_MINUTES", 480)),
             TasksEnabledSetting = Bool(config, "TASKS_ENABLED", true),
+            TaskInviteOnly = inviteOnly,
             TaskConcurrency = Int(config, "TASK_CONCURRENCY", 2),
             TaskTimeout = TimeSpan.FromMinutes(Int(config, "TASK_TIMEOUT_MINUTES", 10)),
             TaskMaxToolRounds = Int(config, "TASK_MAX_TOOL_ROUNDS", 15),
@@ -165,7 +184,8 @@ public sealed record ServerOptions
                 logger.LogInformation("Browser-only mode: nothing is stored on the server.");
             else
                 logger.LogInformation("Server mode: profiles {Profiles}; scheduled tasks {Tasks}.",
-                    "on", options.TasksEnabled ? "on" : options.DataKey is null ? "off (no DATA_KEY)" : "off (TASKS_ENABLED=false)");
+                    "on", options.TasksEnabled ? options.TaskInviteOnly ? "on (invite only)" : "on"
+                        : options.DataKey is null ? "off (no DATA_KEY)" : "off (TASKS_ENABLED=false)");
         }
 
         return options;

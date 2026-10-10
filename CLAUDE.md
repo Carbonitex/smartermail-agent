@@ -98,7 +98,7 @@ Two xunit projects:
 | Project | Covers | Gates images |
 |---|---|---|
 | `tests/SmarterMail.Tests` | Core (`StartupSignIn`, `AuthResponseClassifier`, per-sign-in clientIds), tool-library guards (below), `Mcp.Hosting` (settings, read-only filter), `docs/tools.md` freshness | user, admin, agent |
-| `tests/Agent.Tests` | agent: policy, schemas, dispatch, roles, session accounts, account logout, `UserContextFactory`, MCP token scoping (in-process host via `WebApplicationFactory<Program>`), remember-me, proxy trust, connect-time SSRF guard, path base, home link; server mode: options, both modes over HTTP, sealer, SQLite store, profile runtime, a full passkey round trip (`SoftAuthenticator`), task definitions, the task gate, the server-side loop, a scheduled run against a fake LLM (`FakeLlm`). Runs serially (see `TestEnvironment.cs`) | agent |
+| `tests/Agent.Tests` | agent: policy, schemas, dispatch, roles, session accounts, account logout, `UserContextFactory`, MCP token scoping (in-process host via `WebApplicationFactory<Program>`), remember-me, proxy trust, connect-time SSRF guard, path base, home link; server mode: options, both modes over HTTP, sealer, SQLite store, profile runtime, a full passkey round trip (`SoftAuthenticator`), task definitions, the task gate, the server-side loop, a scheduled run against a fake LLM (`FakeLlm`), invite-only tasks (codes, store, gates, CLI). Runs serially (see `TestEnvironment.cs`) | agent |
 
 The guards in `tests/SmarterMail.Tests`:
 
@@ -187,10 +187,12 @@ Program.cs                    composition root, middleware, MCP registration, MC
 Server/
   ServerOptions.cs            BROWSER_ONLY_MODE, DATA_DIR, DATA_KEY, PUBLIC_ORIGIN, TASK_* (from IConfiguration)
   ServerModeOnlyAttribute.cs  404 SERVER_MODE_DISABLED before a profile/task controller is built
+  AdminCli.cs                 `invites …` / `access …`: the operator's commands for TASKS_ACCESS=invite
 Storage/
   DataStore.cs                SQLite file, migrations on PRAGMA user_version, ADO helpers
   ProfileStore.cs             profiles, passkeys, stored accounts (rows hold sealed blobs)
   TaskStore.cs                tasks and their runs
+  TaskInviteStore.cs          invite codes (hashed) and which profiles may use tasks
 Profiles/
   ProfileRuntime.cs           one live owner of a profile's accounts (+ ProfileRegistry: leases)
   ProfileCrypto.cs            accounts-key check, recovery hash, sealing to the profile's public key
@@ -238,6 +240,7 @@ Controllers/
   ConfigController.cs         /api/config (mode and what this server offers)
   ProfileController.cs        /api/profile/* (server mode)
   TasksController.cs          /api/tasks/* (server mode with DATA_KEY)
+  TaskAccess.cs               the 403 TASKS_NOT_INVITED every task endpoint gives a profile without access
 Mcp/
   ToolPolicy.cs               THE policy: registered tool classes → scope + category, role→scope,
                               write classification, eligibility, `account` injection + resolution
@@ -400,7 +403,7 @@ whose resume version is newer, carries `X-Resume-Version: <newer>`; the browser 
 | `GET /api/tools` | session | `200 [ { name, description, inputSchema, category, scope, write, destructive } ]` — only tools with at least one eligible account; `inputSchema` carries the injected `account` property (below) |
 | `POST /api/tools/call` | session, `api` limiter (120/min/IP) | `{ name, arguments: {…, account?} }` → `200 { isError, content, account }` (`account` = the handle it ran as, `null` if refused before resolving). Tool exceptions **and payloads carrying `success:false`** → `isError: true`. Missing / unknown / wrong-role `account` → `200 isError` listing the valid handles. Write tool on a read-only account → `403 { error }` naming the handle. Unknown tool → `404`. |
 | `POST /mcp` | session cookie **or** `Authorization: Bearer <MCP token>` (`401` + `WWW-Authenticate: Bearer` for a bad/expired/revoked token or a raw session id) | Stateless MCP, same per-session tool list and schemas, same dispatcher. Account and read-only refusals are `isError: true`; tool results pass through unchanged. |
-| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, minIntervalMinutes, maxPerProfile, maxToolRounds, analysisModel, approvals: { ttlHours, maxTtlHours, maxPending, maxProposalsPerRun, defaultProposalsPerRun }, triggers: { enabled, minIntervalMinutes, maxPerProfile, maxRunsPerDay } }, analysis: { defaultModel, artifactThresholdChars } }` (`tasks.analysisModel` null when tasks or analysis are off) |
+| `GET /api/config` | none | `{ mode: "server"\|"browser", resume: { enabled, days }, profiles: { enabled }, tasks: { enabled, inviteOnly, minIntervalMinutes, maxPerProfile, maxToolRounds, analysisModel, approvals: { ttlHours, maxTtlHours, maxPending, maxProposalsPerRun, defaultProposalsPerRun }, triggers: { enabled, minIntervalMinutes, maxPerProfile, maxRunsPerDay } }, analysis: { defaultModel, artifactThresholdChars } }` (`tasks.analysisModel` null when tasks or analysis are off) |
 | `/api/profile/*`, `/api/tasks/*` | see [Server mode](#server-mode-profiles-and-scheduled-tasks) | `404 SERVER_MODE_DISABLED` in browser-only mode |
 | `GET /health` | none | `smartermail-agent ok` |
 
@@ -816,6 +819,42 @@ same login reuses the row id (`RowForLogin`), which tasks refer to.
   does. The runs list shows prompt / completion tokens.
 - `ProfileMaintenance` refreshes delegated accounts untouched for 20 hours once a day, so a weekly
   task still finds a live token, and deletes profiles idle for `PROFILE_IDLE_DAYS`.
+
+### Invite-only tasks
+
+`TASKS_ACCESS=invite` (default `open`; `ServerOptions.TaskInviteOnly`). Profiles work for everyone;
+scheduled tasks only for a profile with `profiles.task_access_at` set (migration 5), i.e. one that
+redeemed a code or that the operator granted. `ServerOptions.AllowsTasks(ProfileRow)` is the one check.
+
+- **Codes** (`Storage/TaskInviteStore.cs`, table `task_invites`): 80 random bits as 16 Crockford base32
+  characters, shown once as `XXXX-XXXX-XXXX-XXXX`; stored as `base64url(SHA-256("sma-task-invite-v1\n" +
+  normalized))`. `Normalize` ignores case, spaces and dashes and reads O as 0, I / L as 1. `max_uses`
+  (default 1), optional `expires_at`, `revoked_at`, the operator's `note` (≤ 80). Redeeming is one
+  transaction (`UPDATE … RETURNING`, so concurrent redemptions cannot overspend); a profile that already
+  has access spends nothing. Unknown, used-up, expired and revoked codes all answer the same.
+- **Operator** (`Server/AdminCli.cs`): `dotnet SmarterMailAgent.dll invites create [--uses N] [--days N]
+  [--note T] | list | revoke <id> [--profiles]`, `access list | grant <profileId> | revoke <profileId>`.
+  `Program.cs` hands those argument lists to it before building the web host; it reads the same
+  environment and opens the same SQLite file (WAL). stdout of `invites create` is the code alone. No
+  HTTP admin endpoint, on purpose.
+- **Revoking access** (`RevokeAccess`, database only, since the CLI is another process): access and the
+  task key cleared, every task disabled with status `TASKS_NOT_INVITED`, pending proposals denied
+  (payload erased). Delegated rows stay `DATA_KEY`-sealed until the owner's next unlock, where
+  `ProfileController.UndelegateWithoutAccess` moves the live ones back under the accounts key; the
+  daily keep-alive skips profiles without access meanwhile.
+- **Gates**, each `403 TASKS_NOT_INVITED` (`Controllers/TaskAccess.cs`): delegation **on**, saving a
+  task key, task create / update / run, `POST /api/tasks/probe`, approve options / approve. Open
+  without access: reading tasks, runs and proposals, deleting tasks, denying, clearing the key,
+  delegation off, pausing. Unattended paths: `TaskRunner.Open` and `TriggerProber.ProbeAsync` fail with
+  `TASKS_NOT_INVITED`, a hard failure (`TaskStore.HardFailures`) that pauses the task, so an instance
+  switched from `open` to `invite` stops existing tasks without anyone running a command.
+- **HTTP**: `POST /api/profile/task-access { code }` (cookie, `login` limiter) → `200 ProfileView`;
+  `400 INVITE_INVALID`; `404 TASKS_DISABLED`. `ProfileView.taskAccess = { inviteOnly, granted }`, and
+  `canDelegate` is false without access. `GET /api/config` → `tasks.inviteOnly`. Logged: redeemed /
+  refused, never the code.
+- **UI**: `profile-ui.js` `needsTaskInvite(view)` / `inviteForm`, shown in the Profile menu's Scheduled
+  tasks section and in place of the Tasks dialog's setup (earlier results stay readable). Dev stub:
+  `TASKS_ACCESS=invite`, code `STUB-INVT-CODE-0000`.
 
 ### Approval queue
 
@@ -1240,6 +1279,7 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 | `TASK_ANALYSIS_MODEL` | `ANALYSIS_MODEL` | analysis model for scheduled runs; `off`/`none` = results clamped as before |
 | `APPROVAL_MAX_PENDING` | `100` | pending approval proposals per profile |
 | `TASK_MAX_PROPOSALS` | `50` | highest per-run proposal limit a task may set |
+| `TASKS_ACCESS` | `open` | `invite` = scheduled tasks only for profiles that redeemed an invite code or were granted access (see [Invite-only tasks](#invite-only-tasks)) |
 | `TRIGGERS_ENABLED` (true), `TRIGGER_MIN_INTERVAL_MINUTES` (5), `TRIGGERS_PER_PROFILE` (5), `TRIGGER_MAX_RUNS_PER_DAY` (24), `TRIGGER_CONCURRENCY` (4), `PROBES_PER_HOST_PER_MINUTE` (30), `PROBES_PER_PROFILE_PER_MINUTE` (6, interactive probes) | | condition-triggered tasks |
 | `PATH_BASE` | `/` | path prefix, e.g. `/mail-agent` when a reverse proxy serves it under one |
 | `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` / `-Proto` are believed. Unset = forwarded headers ignored; limits key off the TCP peer. A malformed entry fails startup |

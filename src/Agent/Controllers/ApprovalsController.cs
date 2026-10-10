@@ -197,10 +197,13 @@ public sealed class ApprovalsController(
         session = HttpContext.RequireSession();
         if (session.Profile is not { } profile)
             return NotFound(new { error = "Save this chat to a profile first.", code = "NO_PROFILE" });
-        if (profiles.GetProfile(profile.ProfileId) is null)
+        if (profiles.GetProfile(profile.ProfileId) is not { } row)
             return NotFound(new { error = "That profile no longer exists.", code = "PROFILE_GONE" });
         if (unlocked && !profile.IsUnlocked)
             return Conflict(new { error = "Unlock your profile with your passkey first.", code = "PROFILE_LOCKED" });
+        // Approving runs a change with a delegated account: invite-only like the rest (denying never is).
+        if (unlocked && !options.AllowsTasks(row))
+            return TaskAccess.NotInvited(this);
 
         profileId = profile.ProfileId;
         return null;

@@ -228,6 +228,13 @@ public sealed class TriggerProber(
         var started = DateTimeOffset.UtcNow;
         var accountId = trigger.Probe?.AccountId ?? "";
 
+        // Invite-only tasks: a profile without access probes nothing (and the task pauses at once).
+        if (profiles.GetProfile(task.ProfileId) is { } owner && !server.AllowsTasks(owner))
+        {
+            Fail(task, definition, TaskInviteStore.NotInvitedCode, nowMs);
+            return;
+        }
+
         if (TriggerAccounts.BaseUrlOf(registry, profiles, task.ProfileId, accountId) is { } baseUrl && !bucket.TryTake(baseUrl))
         {
             triggers.Defer(task.Id, nowMs + (long)TaskRunScheduler.Tick.TotalMilliseconds);

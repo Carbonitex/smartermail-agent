@@ -48,8 +48,10 @@ public sealed class TriggersController(
         var session = HttpContext.RequireSession();
         if (session.Profile is not { } runtime)
             return NotFound(new { error = "Save this chat to a profile first.", code = "NO_PROFILE" });
-        if (profiles.GetProfile(runtime.ProfileId) is null)
+        if (profiles.GetProfile(runtime.ProfileId) is not { } profileRow)
             return NotFound(new { error = "That profile no longer exists.", code = "PROFILE_GONE" });
+        if (!options.AllowsTasks(profileRow))
+            return TaskAccess.NotInvited(this);
         if (!runtime.IsUnlocked)
             return Conflict(new { error = "Unlock your profile with your passkey first.", code = "PROFILE_LOCKED" });
 

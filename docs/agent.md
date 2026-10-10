@@ -103,6 +103,34 @@ Safety rules, enforced by the server rather than the prompt:
 - Three failed runs in a row pause a task; a rejected sign-in or OpenRouter key pauses it at once.
 - `TASKS_ENABLED=false` switches tasks off for the whole instance; each profile can pause its own.
 
+### Invite-only tasks (`TASKS_ACCESS=invite`)
+
+A delegated account is a sign-in the server can use on its own, so on a public instance you may want
+to choose who can delegate. With `TASKS_ACCESS=invite`, profiles still work for everyone, but
+scheduled tasks are closed to a profile until it redeems an **invite code** under **Profile → Scheduled
+tasks** (or **Tasks**). Until then it cannot delegate an account, save a task key, create, edit or run
+a task, test a probe, or approve a queued change, and the server keeps none of its accounts alive.
+
+You make and revoke codes with the same image, against the same `DATA_DIR`. There is no admin web page.
+
+```bash
+docker exec <container> dotnet SmarterMailAgent.dll invites create --note "for Sam"   # prints the code, once
+docker exec <container> dotnet SmarterMailAgent.dll invites create --uses 5 --days 14
+docker exec <container> dotnet SmarterMailAgent.dll invites list
+docker exec <container> dotnet SmarterMailAgent.dll invites revoke <id> [--profiles]
+docker exec <container> dotnet SmarterMailAgent.dll access list
+docker exec <container> dotnet SmarterMailAgent.dll access grant <profileId>
+docker exec <container> dotnet SmarterMailAgent.dll access revoke <profileId>
+```
+
+A code is 16 characters (`XXXX-XXXX-XXXX-XXXX`, 80 random bits; case, spaces and dashes don't
+matter). It is good for one profile unless you set `--uses`, and never expires unless you set `--days`.
+The server stores only a hash of the code. Revoking a profile's access pauses its tasks, deletes its
+task key and denies its pending approvals. Its delegated accounts go back under the profile's own key
+the next time the owner unlocks it, and they are no longer refreshed in the meantime. Switching an
+existing instance to `invite` affects profiles that already have tasks: give them access with
+`access grant` first, or their tasks pause on their next run.
+
 Run one replica in server mode: the database is SQLite and the scheduler is in-process.
 
 ## Settings
@@ -121,6 +149,7 @@ All settings are optional.
 | `PROFILE_MAX_IDLE_MINUTES` | `480` | Longest session idle timeout a user may choose for their profile (sessions still end at `SESSION_MAX_HOURS`) |
 | `MAX_PROFILES` | `1000` | Profiles this instance holds at most |
 | `TASKS_ENABLED` | `true` | `false` switches scheduled tasks off |
+| `TASKS_ACCESS` | `open` | `invite` = tasks only for profiles that redeemed an invite code (see [Invite-only tasks](#invite-only-tasks-tasks_accessinvite)) |
 | `TASK_CONCURRENCY` | `2` | Task runs at once |
 | `TASK_TIMEOUT_MINUTES` | `10` | Longest a run may take |
 | `TASK_MAX_TOOL_ROUNDS` | `15` | Tool rounds per run |

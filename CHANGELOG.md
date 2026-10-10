@@ -37,6 +37,11 @@ All notable changes to this project are documented here. The format follows
   Matched data reaches the model only as a tool result. `POST /api/tasks/probe`; env
   `TRIGGERS_ENABLED`, `TRIGGER_MIN_INTERVAL_MINUTES`, `TRIGGERS_PER_PROFILE`,
   `TRIGGER_MAX_RUNS_PER_DAY`, `TRIGGER_CONCURRENCY`, `PROBES_PER_HOST_PER_MINUTE`.
+- Agent: invite-only scheduled tasks. With `TASKS_ACCESS=invite`, a profile has to redeem an invite
+  code (Profile menu or Tasks) before it can delegate accounts or set up tasks. Operators make,
+  list and revoke codes, and grant or revoke a profile's access, with
+  `dotnet SmarterMailAgent.dll invites …` / `access …` against the same `DATA_DIR`. The default,
+  `open`, changes nothing. `POST /api/profile/task-access`.
 
 - `upload_attachment` takes the file as `base64Content` or `text` (with `fileName`), so remote
   clients can attach files they have. New `inline=true` embeds an image: SmarterMail assigns the

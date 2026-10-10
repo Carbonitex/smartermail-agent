@@ -10,7 +10,7 @@
 
 import * as api from './api.js';
 import * as profile from './profile.js';
-import { loadView, currentView } from './profile-ui.js';
+import { loadView, currentView, needsTaskInvite, inviteForm } from './profile-ui.js';
 import { renderMarkdown, prettyJson } from './markdown.js';
 import { categoryOf } from './llm.js';
 import { renderApprovals, modeSelect, approvalFields } from './approvals.js';
@@ -71,6 +71,17 @@ async function renderList() {
   listing = tasks;
 
   const parts = [];
+  if (needsTaskInvite(view)) {
+    // Invite-only server: nothing to set up until a code is redeemed; earlier results stay readable.
+    parts.push(inviteForm(() => renderList()));
+    for (const t of tasks.tasks) parts.push(taskCard(t, view));
+    if (tasks.tasks.length) {
+      const actions = div('modal-actions');
+      actions.append(button('All results', () => renderRuns(null)));
+      parts.push(actions);
+    }
+    return void el.body.replaceChildren(...parts);
+  }
   const delegated = (view?.accounts || []).filter((a) => a.delegated);
   if (!view?.hasTaskKey || !delegated.length) {
     parts.push(para(

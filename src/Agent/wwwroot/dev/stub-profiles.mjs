@@ -29,6 +29,9 @@ const accountsCheck = (key) => crypto.createHmac('sha256', key).update('sma-acco
 export const MODE = process.env.MODE === 'browser' ? 'browser' : 'server';
 export const TASKS = process.env.TASKS !== 'false';
 export const TRIGGERS = TASKS && process.env.TRIGGERS !== 'false';
+/** TASKS_ACCESS=invite: tasks need an invite code; the stub accepts STUB-INVT-CODE-0000 (any case, any spacing). */
+export const INVITE_ONLY = TASKS && process.env.TASKS_ACCESS === 'invite';
+const STUB_INVITE = 'STUB-INVT-CODE-0000';
 const TRIGGER_MIN = 5;
 const TRIGGERS_PER_PROFILE = 5;
 
@@ -42,7 +45,8 @@ export function config(resumeEnabled, resumeDays) {
       enabled: MODE === 'server' && TASKS, minIntervalMinutes: 15, maxPerProfile: 10, maxToolRounds: 15,
       analysisModel: MODE === 'server' && TASKS ? 'openai/gpt-6-luna' : null,
       approvals: APPROVALS,
-      triggers: { enabled: MODE === 'server' && TRIGGERS, minIntervalMinutes: TRIGGER_MIN, maxPerProfile: TRIGGERS_PER_PROFILE, maxRunsPerDay: 24 }
+      triggers: { enabled: MODE === 'server' && TRIGGERS, minIntervalMinutes: TRIGGER_MIN, maxPerProfile: TRIGGERS_PER_PROFILE, maxRunsPerDay: 24 },
+      inviteOnly: MODE === 'server' && INVITE_ONLY
     },
     analysis: { defaultModel: 'openai/gpt-6-luna', artifactThresholdChars: 20000 }
   };
@@ -68,13 +72,18 @@ function view(p) {
     publicKey: p.publicKey,
     encryptedPrivateKey: p.encryptedPrivateKey,
     settingsVersion: p.settingsVersion,
-    canDelegate: TASKS,
+    canDelegate: TASKS && granted(p),
     tasksEnabled: TASKS,
     hasTaskKey: !!p.taskKey,
     tasksPaused: !!p.paused,
-    idle: { minutes: p.idleMinutes ?? null, defaultMinutes: IDLE_DEFAULT, minMinutes: 5, maxMinutes: IDLE_MAX }
+    idle: { minutes: p.idleMinutes ?? null, defaultMinutes: IDLE_DEFAULT, minMinutes: 5, maxMinutes: IDLE_MAX },
+    taskAccess: { inviteOnly: INVITE_ONLY, granted: granted(p) }
   };
 }
+
+const granted = (p) => !INVITE_ONLY || !!p.taskAccess;
+const notInvited = { error: 'Scheduled tasks on this server are by invitation. Enter an invite code in the Profile menu first.', code: 'TASKS_NOT_INVITED' };
+const normalizeInvite = (code) => String(code || '').toUpperCase().replace(/[\s-]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
 
 /**
  * Handles /profile/* and /tasks/* (and /config). Returns true when it answered.
@@ -237,11 +246,26 @@ export async function handle(ctx) {
   if (dg && method === 'PUT') {
     const a = profile.accounts.find((x) => x.id === decodeURIComponent(dg[1]));
     if (!a) return json(res, 404, { error: 'That account is not signed in to this profile.', code: 'ACCOUNT_NOT_LIVE' }), true;
+    if (body.enabled && !granted(profile)) return json(res, 403, notInvited), true;
     a.delegated = !!body.enabled;
     json(res, 200, view(profile));
     return true;
   }
-  if (p === '/profile/task-key' && method === 'PUT') { profile.taskKey = body.key || null; json(res, 200, view(profile)); return true; }
+  if (p === '/profile/task-key' && method === 'PUT') {
+    if (body.key && !granted(profile)) return json(res, 403, notInvited), true;
+    profile.taskKey = body.key || null;
+    json(res, 200, view(profile));
+    return true;
+  }
+  if (p === '/profile/task-access' && method === 'POST') {
+    if (!TASKS) return json(res, 404, { error: 'Scheduled tasks are not enabled on this server.', code: 'TASKS_DISABLED' }), true;
+    if (!granted(profile) && normalizeInvite(body.code) !== normalizeInvite(STUB_INVITE)) {
+      return json(res, 400, { error: 'That invite code is not valid (or has been used up).', code: 'INVITE_INVALID' }), true;
+    }
+    profile.taskAccess = true;
+    json(res, 200, view(profile));
+    return true;
+  }
   if (p === '/profile/idle' && method === 'PUT') {
     const m = body.minutes;
     if (m != null && !(Number.isInteger(m) && m >= 5 && m <= IDLE_MAX)) {
@@ -264,6 +288,12 @@ export async function handle(ctx) {
   /* ---- tasks ---- */
 
   if (!TASKS) return json(res, 404, { error: 'Scheduled tasks are not enabled on this server.', code: 'TASKS_DISABLED' }), true;
+
+  // Invite-only: everything that sets up or runs a task (or approves a change) waits for a code.
+  if (!granted(profile) && method !== 'GET' && method !== 'DELETE' &&
+      !/^\/tasks\/(runs\/[^/]+\/read|proposals\/[^/]+\/(deny|read)|proposals\/deny)$/.test(p)) {
+    return json(res, 403, notInvited), true;
+  }
 
   if (await handleApprovals(ctx, profile, s, body)) return true;
 

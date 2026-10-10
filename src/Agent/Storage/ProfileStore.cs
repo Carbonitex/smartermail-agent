@@ -12,7 +12,8 @@ public sealed record ProfileRow(
     string? RecoveryWrappedKey,
     string? RecoveryAuthHash,
     string? TaskLlmKey,
-    bool TasksPaused);
+    bool TasksPaused,
+    long? TaskAccessAt = null);
 
 public sealed record PasskeyRow(
     string CredentialId,
@@ -77,7 +78,7 @@ public sealed class ProfileStore(DataStore db)
         using var cmd = c.Command(
             """
             SELECT id, created_at, last_seen_at, public_key, encrypted_private_key, settings, settings_version,
-                   accounts_key_check, recovery_wrapped_key, recovery_auth_hash, task_llm_key, tasks_paused
+                   accounts_key_check, recovery_wrapped_key, recovery_auth_hash, task_llm_key, tasks_paused, task_access_at
             FROM profiles WHERE id = $id
             """, ("$id", id));
         using var r = cmd.ExecuteReader();
@@ -85,7 +86,7 @@ public sealed class ProfileStore(DataStore db)
             return null;
         return new ProfileRow(r.GetString(0), r.GetInt64(1), r.GetInt64(2), r.GetString(3), r.GetString(4),
             r.StringOrNull(5), r.GetInt64(6), r.GetString(7), r.StringOrNull(8), r.StringOrNull(9), r.StringOrNull(10),
-            r.GetInt64(11) != 0);
+            r.GetInt64(11) != 0, r.Int64OrNull(12));
     }
 
     public void TouchProfile(string id)

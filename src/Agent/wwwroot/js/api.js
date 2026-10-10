@@ -328,6 +328,14 @@ export function setTaskKey(key) {
   return request('/profile/task-key', { method: 'PUT', body: { key: key || null } });
 }
 
+/**
+ * POST /api/profile/task-access { code } → the profile view, with taskAccess.granted. Invite-only
+ * scheduled tasks (TASKS_ACCESS=invite); 400 INVITE_INVALID for any code that cannot be used.
+ */
+export function redeemTaskInvite(code) {
+  return request('/profile/task-access', { method: 'POST', body: { code } });
+}
+
 /** PUT /api/profile/idle → the profile view; minutes null = the server default. 400 IDLE_OUT_OF_RANGE. */
 export function setProfileIdle(minutes) {
   return request('/profile/idle', { method: 'PUT', body: { minutes } });

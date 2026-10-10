@@ -58,6 +58,7 @@ services:
     environment:
       BROWSER_ONLY_MODE: ${AGENT_BROWSER_ONLY:-false}
       DATA_KEY: ${DATA_KEY:-}                     # turns on scheduled tasks; keep it stable and out of backups of the volume
+      TASKS_ACCESS: ${AGENT_TASKS_ACCESS:-open}   # invite = tasks need an invite code (docs/agent.md)
       PUBLIC_ORIGIN: ${AGENT_PUBLIC_ORIGIN:-}     # e.g. https://mail-agent.example.com (passkeys are bound to it)
       RESUME_KEY: ${RESUME_KEY:-}                 # "Remember me on this device" for browsers without passkey PRF
       PATH_BASE: ${AGENT_PATH_BASE:-/}            # e.g. /mail-agent when served under a path

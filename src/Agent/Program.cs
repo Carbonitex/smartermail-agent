@@ -16,6 +16,10 @@ using SmarterMailAgent.Tasks.Triggers;
 using SmarterMailAgent.Web;
 using SmarterMailMcp.Core.Models;
 
+// `invites …` / `access …`: the operator's commands for invite-only tasks, instead of the web host.
+if (AdminCli.Handles(args))
+    return AdminCli.Run(args);
+
 SmarterMailAgent.Logging.CoreConsoleFilter.Install();
 
 var builder = WebApplication.CreateBuilder(args);
@@ -53,6 +57,7 @@ if (serverOptions.ServerMode)
     builder.Services.AddSingleton<TaskStore>();
     builder.Services.AddSingleton<ProposalStore>();
     builder.Services.AddSingleton<TriggerStore>();
+    builder.Services.AddSingleton<TaskInviteStore>();
     if (serverOptions.TasksEnabled)
     {
         builder.Services.AddHttpClient<OpenRouterClient>(http => http.Timeout = TimeSpan.FromMinutes(3));
@@ -269,6 +274,6 @@ app.Logger.LogInformation("smartermail-agent ready. {Total} tools: {Scopes}.",
     catalog.Count, string.Join(", ", counts));
 
 app.Run();
-return;
+return 0;
 
 static Session? SessionOf(IServiceProvider? services) => services?.GetService(typeof(Session)) as Session;

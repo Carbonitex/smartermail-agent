@@ -24,6 +24,7 @@ public sealed class ProfileController(
     ProfileRegistry registry,
     PasskeyService passkeys,
     AccountRestorer restorer,
+    TaskInviteStore invites,
     ServerOptions options,
     ILogger<ProfileController> logger) : ControllerBase
 {
@@ -55,6 +56,12 @@ public sealed class ProfileController(
 
     public sealed record PausedRequest(bool Paused);
 
+    public sealed record TaskAccessRequest(string? Code);
+
+    /// <param name="InviteOnly">TASKS_ACCESS=invite on this server.</param>
+    /// <param name="Granted">This profile may use scheduled tasks (always true when not invite-only).</param>
+    public sealed record TaskAccessView(bool InviteOnly, bool Granted);
+
     /// <param name="Minutes">Null = the server default.</param>
     public sealed record IdleRequest(int? Minutes);
 
@@ -80,7 +87,7 @@ public sealed class ProfileController(
     public sealed record ProfileView(
         string Id, bool Unlocked, IReadOnlyList<PasskeyView> Passkeys, IReadOnlyList<StoredAccountView> Accounts,
         bool Recovery, string PublicKey, string EncryptedPrivateKey, long SettingsVersion,
-        bool CanDelegate, bool TasksEnabled, bool HasTaskKey, bool TasksPaused, IdleView Idle);
+        bool CanDelegate, bool TasksEnabled, bool HasTaskKey, bool TasksPaused, IdleView Idle, TaskAccessView TaskAccess);
 
     // ------------------------------------------------------------------ creation
 
@@ -278,6 +285,7 @@ public sealed class ProfileController(
         }
 
         var skipped = await session.Profile.RestoreAsync(restorer, SessionStore.MaxAccounts, ct);
+        UndelegateWithoutAccess(session.Profile, profile);
         logger.LogInformation("Profile unlocked: {Live} account(s) live, {Skipped} skipped.", session.Count, skipped.Count);
         return Ok(new UnlockResponse(SessionResponse.From(session), skipped
             .Select(s => new SkippedAccount(s.Candidate.Id ?? "", s.Entry.BaseUrl, s.Entry.Login, s.Entry.Role.ToString(), s.Reason))
@@ -396,6 +404,8 @@ public sealed class ProfileController(
             return refusal;
         if (!session.Profile!.CanDelegate)
             return Conflict(new { error = "Scheduled tasks are not enabled on this server (no DATA_KEY).", code = "TASKS_DISABLED" });
+        if (request.Enabled && !options.AllowsTasks(profile))
+            return TaskAccess.NotInvited(this);
         if (!session.Profile.IsUnlocked)
             return Conflict(new { error = "Unlock your profile with your passkey first.", code = "PROFILE_LOCKED" });
         if (!session.Profile.SetDelegation(id, request.Enabled))
@@ -420,6 +430,8 @@ public sealed class ProfileController(
         }
         else
         {
+            if (!options.AllowsTasks(profile))
+                return TaskAccess.NotInvited(this);
             if (request.Key.Length > 512)
                 return BadRequest(new { error = "That key is too long.", code = "KEY_INVALID" });
             var plaintext = System.Text.Encoding.UTF8.GetBytes(request.Key.Trim());
@@ -427,6 +439,36 @@ public sealed class ProfileController(
             CryptographicOperations.ZeroMemory(plaintext);
         }
 
+        return Ok(View(session, store.GetProfile(profile.Id)!));
+    }
+
+    /// <summary>
+    /// Redeems an invite code for scheduled tasks (<c>TASKS_ACCESS=invite</c>). <c>400 INVITE_INVALID</c> for
+    /// any code that cannot be used (unknown, used up, expired or revoked: the answer does not say which).
+    /// A profile that already has access spends nothing.
+    /// </summary>
+    [HttpPost("task-access")]
+    [Authorize(Policy = "SessionAccess")]
+    [EnableRateLimiting("login")]
+    public IActionResult RedeemTaskInvite([FromBody] TaskAccessRequest request)
+    {
+        if (ProfileOf(out var session, out var profile) is { } refusal)
+            return refusal;
+        if (!options.TasksEnabled)
+            return NotFound(new { error = "Scheduled tasks are not enabled on this server.", code = "TASKS_DISABLED" });
+
+        if (options.AllowsTasks(profile))
+            return Ok(View(session, profile));
+
+        switch (invites.Redeem(profile.Id, request.Code))
+        {
+            case TaskInviteStore.RedeemOutcome.Invalid:
+                logger.LogInformation("Task invite refused.");
+                return BadRequest(new { error = "That invite code is not valid (or has been used up).", code = "INVITE_INVALID" });
+            case TaskInviteStore.RedeemOutcome.Granted:
+                logger.LogInformation("Task invite redeemed.");
+                break;
+        }
         return Ok(View(session, store.GetProfile(profile.Id)!));
     }
 
@@ -514,12 +556,27 @@ public sealed class ProfileController(
             profile.PublicKey,
             profile.EncryptedPrivateKey,
             profile.SettingsVersion,
-            runtime.CanDelegate,
+            runtime.CanDelegate && options.AllowsTasks(profile),
             options.TasksEnabled,
             profile.TaskLlmKey is not null,
             profile.TasksPaused,
             new IdleView(store.IdleMinutes(profile.Id), (int)SessionStore.IdleTimeout.TotalMinutes,
-                ServerOptions.ProfileMinIdleMinutes, options.ProfileMaxIdleMinutes));
+                ServerOptions.ProfileMinIdleMinutes, options.ProfileMaxIdleMinutes),
+            new TaskAccessView(options.TaskInviteOnly, options.AllowsTasks(profile)));
+    }
+
+    /// <summary>
+    /// A profile without task access (revoked, or the server became invite-only) gets its delegated live
+    /// accounts back under its own key at unlock, so the server can no longer open them alone.
+    /// </summary>
+    private void UndelegateWithoutAccess(ProfileRuntime runtime, ProfileRow profile)
+    {
+        if (options.AllowsTasks(profile) || !runtime.CanDelegate)
+            return;
+        var delegated = runtime.Rows.Where(r => r.Seal == ProfileStore.SealServer && runtime.Accounts.FindById(r.Id) is not null).ToList();
+        var moved = delegated.Count(r => runtime.SetDelegation(r.Id, false));
+        if (moved > 0)
+            logger.LogInformation("Profile without task access: {Count} delegated account(s) moved back under the profile key.", moved);
     }
 
     /// <summary>The request's profile session and its row, or the refusal to send instead.</summary>

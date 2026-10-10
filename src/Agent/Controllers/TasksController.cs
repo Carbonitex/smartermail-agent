@@ -66,6 +66,8 @@ public sealed class TasksController(
     {
         if (Gate(out var profileId, out var sealer) is { } refusal)
             return refusal;
+        if (TaskAccess.Refusal(this, options, profiles, profileId) is { } notInvited)
+            return notInvited;
         if (tasks.CountForProfile(profileId) >= options.TasksPerProfile)
             return Conflict(new { error = $"A profile can have at most {options.TasksPerProfile} tasks.", code = "TASK_LIMIT" });
 
@@ -89,6 +91,8 @@ public sealed class TasksController(
     {
         if (Gate(out var profileId, out var sealer) is { } refusal)
             return refusal;
+        if (TaskAccess.Refusal(this, options, profiles, profileId) is { } notInvited)
+            return notInvited;
         if (tasks.Get(profileId, id) is null)
             return NotFound(new { error = "No such task.", code = "TASK_NOT_FOUND" });
 
@@ -118,6 +122,8 @@ public sealed class TasksController(
     {
         if (Gate(out var profileId, out var sealer) is { } refusal)
             return refusal;
+        if (TaskAccess.Refusal(this, options, profiles, profileId) is { } notInvited)
+            return notInvited;
         if (tasks.Get(profileId, id) is not { } task)
             return NotFound(new { error = "No such task.", code = "TASK_NOT_FOUND" });
 
