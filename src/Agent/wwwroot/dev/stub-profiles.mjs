@@ -16,6 +16,7 @@
 
 import crypto from 'node:crypto';
 import * as vault from '../js/vault.js';
+import { evaluatePredicate } from './stub-predicate.mjs';
 
 const profiles = new Map();   // id -> profile
 const ceremonies = new Map(); // ceremonyId -> { kind, profileId?, sessionId? }
@@ -26,6 +27,9 @@ const accountsCheck = (key) => crypto.createHmac('sha256', key).update('sma-acco
 
 export const MODE = process.env.MODE === 'browser' ? 'browser' : 'server';
 export const TASKS = process.env.TASKS !== 'false';
+export const TRIGGERS = TASKS && process.env.TRIGGERS !== 'false';
+const TRIGGER_MIN = 5;
+const TRIGGERS_PER_PROFILE = 5;
 
 /** /api/config, as the server answers it. */
 export function config(resumeEnabled, resumeDays) {
@@ -33,7 +37,10 @@ export function config(resumeEnabled, resumeDays) {
     mode: MODE,
     resume: { enabled: resumeEnabled, days: resumeEnabled ? resumeDays : 0 },
     profiles: { enabled: MODE === 'server' },
-    tasks: { enabled: MODE === 'server' && TASKS, minIntervalMinutes: 15, maxPerProfile: 10, maxToolRounds: 15 }
+    tasks: {
+      enabled: MODE === 'server' && TASKS, minIntervalMinutes: 15, maxPerProfile: 10, maxToolRounds: 15,
+      triggers: { enabled: MODE === 'server' && TRIGGERS, minIntervalMinutes: TRIGGER_MIN, maxPerProfile: TRIGGERS_PER_PROFILE, maxRunsPerDay: 24 }
+    }
   };
 }
 
@@ -258,9 +265,14 @@ export async function handle(ctx) {
     json(res, 200, { tasks: [...profile.tasks.values()].map(taskView), unread: profile.runs.filter((r) => !r.read && r.status !== 'running').length });
     return true;
   }
+  if (p === '/tasks/probe' && method === 'POST') return probe(ctx, s, body), true;
+
   if (p === '/tasks' && method === 'POST') {
-    const errors = validate(profile, body);
+    const errors = validate(profile, body, ctx.tools);
     if (errors.length) return json(res, 400, { error: errors.join(' '), errors, code: 'TASK_INVALID' }), true;
+    if (body.trigger && [...profile.tasks.values()].filter((x) => x.definition.trigger).length >= TRIGGERS_PER_PROFILE) {
+      return json(res, 409, { error: `A profile can have at most ${TRIGGERS_PER_PROFILE} condition-triggered tasks.`, code: 'TRIGGER_LIMIT' }), true;
+    }
     const t = { id: b64(crypto.randomBytes(9)), enabled: body.enabled !== false, status: 'ok', definition: definitionOf(body), lastRunAt: null };
     profile.tasks.set(t.id, t);
     json(res, 200, taskView(t));
@@ -271,10 +283,11 @@ export async function handle(ctx) {
     const t = profile.tasks.get(decodeURIComponent(tk[1]));
     if (!t) return json(res, 404, { error: 'No such task.', code: 'TASK_NOT_FOUND' }), true;
     if (method === 'PUT') {
-      const errors = validate(profile, body);
+      const errors = validate(profile, body, ctx.tools);
       if (errors.length) return json(res, 400, { error: errors.join(' '), errors, code: 'TASK_INVALID' }), true;
       t.definition = definitionOf(body);
       t.enabled = body.enabled !== false;
+      t.probe = null;                                    // saving resets the trigger state
       json(res, 200, taskView(t));
       return true;
     }
@@ -290,7 +303,18 @@ export async function handle(ctx) {
   if (rn && method === 'POST') {
     const t = profile.tasks.get(decodeURIComponent(rn[1]));
     if (!t) return json(res, 404, { error: 'No such task.', code: 'TASK_NOT_FOUND' }), true;
-    const run = startRun(profile, t, 'manual', !!body.dryRun);
+    let seed = null;
+    if (t.definition.trigger) {
+      // A condition task: check once, then run (or alert) with that result, whether it holds or not.
+      const tr = t.definition.trigger;
+      const account = s.accounts.find((a) => a.id === tr.probe.accountId) || profile.accounts.find((a) => a.id === tr.probe.accountId);
+      const r = account && ctx.runTool(tr.probe.tool, tr.probe.arguments || {}, account);
+      if (!r || r.isError) return json(res, 502, { error: "The condition's check failed: the tool answered with an error.", code: 'PROBE_FAILED' }), true;
+      const evaluation = evaluatePredicate(tr.when, JSON.parse(r.content));
+      t.probe = { lastProbeAt: new Date().toISOString(), lastValue: evaluation.value };
+      seed = { tool: tr.probe.tool, arguments: JSON.stringify(tr.probe.arguments || {}), account: account.handle, evaluation };
+    }
+    const run = startRun(profile, t, 'manual', !!body.dryRun, seed);
     json(res, 202, { runId: run.id });
     return true;
   }
@@ -340,17 +364,43 @@ function registrationOptions(host, profileId, name, exclude) {
   };
 }
 
+const triggerOf = (t) => (t ? {
+  probe: { accountId: t.probe?.accountId || null, tool: t.probe?.tool || null, arguments: t.probe?.arguments || {} },
+  everyMinutes: Number(t.everyMinutes) || 0, when: t.when ?? null, fire: t.fire || 'edge', holdFor: Number(t.holdFor) || 1,
+  cooldownMinutes: Number(t.cooldownMinutes) || Number(t.everyMinutes) || 0, action: t.action || 'run', activeHours: t.activeHours || null
+} : null);
+
 const definitionOf = (b) => ({
-  version: 1, name: String(b.name || ''), prompt: String(b.prompt || ''), cron: String(b.cron || ''), timeZone: String(b.timeZone || 'UTC'),
+  version: 1, name: String(b.name || ''), prompt: String(b.prompt || ''), cron: b.trigger ? '' : String(b.cron || ''), timeZone: String(b.timeZone || 'UTC'),
   accountIds: b.accountIds || [], allowedWrites: b.allowedWrites || [], maxWrites: Number(b.maxWrites) || 5, model: String(b.model || ''),
-  emailAccountId: b.emailAccountId || null
+  emailAccountId: b.emailAccountId || null, trigger: triggerOf(b.trigger)
 });
 
-function validate(profile, b) {
+/** The server's trigger rules, roughly (TaskTrigger.Validate). */
+function validateTrigger(profile, b, tools) {
+  const t = b.trigger;
   const errors = [];
+  if (!TRIGGERS) return ['Condition-triggered tasks are switched off on this server.'];
+  const account = profile.accounts.find((a) => a.id === t.probe?.accountId && a.delegated);
+  const tool = (tools || []).find((x) => x.name === t.probe?.tool);
+  if (!account || !(b.accountIds || []).includes(account.id)) errors.push("The account the condition checks must be one of the task's accounts, and allow scheduled tasks.");
+  if (!tool) errors.push(`'${t.probe?.tool}' is not a known tool.`);
+  else if (tool.write) errors.push(`'${tool.name}' makes changes; a condition can only use a tool that reads.`);
+  else for (const r of tool.inputSchema?.required || []) if (!(r in (t.probe.arguments || {}))) errors.push(`'${tool.name}' needs the argument '${r}'.`);
+  if (!(t.everyMinutes >= TRIGGER_MIN && t.everyMinutes <= 1440)) errors.push(`Check every ${TRIGGER_MIN} to 1440 minutes.`);
+  if ((t.cooldownMinutes || t.everyMinutes) < t.everyMinutes) errors.push('The pause between two firings must be at least the check interval.');
+  if (!t.when || typeof t.when !== 'object' || Array.isArray(t.when)) errors.push('Condition: when: the condition must be a JSON object.');
+  if (t.action === 'alert' && !b.emailAccountId) errors.push('"Just email me" needs an account to send the email from.');
+  return errors;
+}
+
+function validate(profile, b, tools) {
+  const errors = [];
+  const alert = b.trigger?.action === 'alert';
   if (!String(b.name || '').trim()) errors.push('Give the task a name (at most 80 characters).');
-  if (!String(b.prompt || '').trim()) errors.push('Describe what the task should do (at most 4000 characters).');
-  if (!/^\S+ \S+ \S+ \S+ \S+$/.test(String(b.cron || '').trim())) errors.push('The schedule is not a valid five-field cron expression in a known time zone.');
+  if (!alert && !String(b.prompt || '').trim()) errors.push('Describe what the task should do (at most 4000 characters).');
+  if (b.trigger) errors.push(...validateTrigger(profile, b, tools));
+  else if (!/^\S+ \S+ \S+ \S+ \S+$/.test(String(b.cron || '').trim())) errors.push('The schedule is not a valid five-field cron expression in a known time zone.');
   else if (/^(\*|\*\/([1-9]|1[0-4]))\s/.test(String(b.cron).trim())) errors.push('Runs must be at least 15 minutes apart.');
   if (!(b.accountIds || []).length) errors.push('Pick at least one account for the task.');
   for (const id of b.accountIds || []) if (!profile.accounts.find((a) => a.id === id && a.delegated)) errors.push('Every account a task uses must allow scheduled tasks (Profile menu).');
@@ -359,10 +409,39 @@ function validate(profile, b) {
 
 function nextRun() { const d = new Date(); d.setUTCDate(d.getUTCDate() + 1); d.setUTCHours(14, 0, 0, 0); return d.toISOString(); }
 
-const taskView = (t) => ({ id: t.id, enabled: t.enabled, status: t.status, consecutiveFailures: 0, nextRunAt: t.enabled ? nextRun() : null, lastRunAt: t.lastRunAt, definition: t.definition });
+const taskView = (t) => ({
+  id: t.id, enabled: t.enabled, status: t.status, consecutiveFailures: 0,
+  nextRunAt: t.enabled && !t.definition.trigger ? nextRun() : null, lastRunAt: t.lastRunAt, definition: t.definition,
+  trigger: t.definition.trigger ? {
+    nextProbeAt: new Date(Date.now() + t.definition.trigger.everyMinutes * 60000).toISOString(),
+    lastProbeAt: t.probe?.lastProbeAt || null, lastValue: t.probe?.lastValue ?? null, probeFailures: 0, firesToday: 0
+  } : null
+});
+
+/** POST /tasks/probe: the session's live account runs a read now; the condition is evaluated against it. */
+function probe(ctx, s, body) {
+  const { json, res } = ctx;
+  if (!TRIGGERS) return json(res, 404, { error: 'Condition-triggered tasks are not enabled on this server.', code: 'TRIGGERS_DISABLED' });
+  if (!s.unlocked) return json(res, 409, { error: 'Unlock your profile with your passkey first.', code: 'PROFILE_LOCKED' });
+  const account = s.accounts.find((a) => a.id === body.accountId);
+  if (!account) return json(res, 404, { error: 'That account is not signed in in this chat.', code: 'ACCOUNT_NOT_LIVE' });
+  const tool = (ctx.tools || []).find((t) => t.name === body.tool);
+  const invalid = (error) => json(res, 400, { error, errors: [error], code: 'PROBE_INVALID' });
+  if (!tool || tool.write) return invalid(`'${body.tool}' is not a tool that only reads.`);
+  const scopeRoles = { Mailbox: ['User', 'DomainAdmin'], DomainAdmin: ['DomainAdmin'], SysAdmin: ['SysAdmin'] };
+  if (!(scopeRoles[tool.scope] || []).includes(account.role)) return invalid(`That account cannot use '${tool.name}'.`);
+  const args = body.arguments || {};
+  if ('account' in args || 'approvalNote' in args) return invalid("'account' is not one of the tool's own arguments.");
+  for (const r of tool.inputSchema?.required || []) if (!(r in args)) return invalid(`'${tool.name}' needs the argument '${r}'.`);
+  const r = ctx.runTool(tool.name, args, account) || { isError: true, content: 'not implemented in the stub' };
+  let parsed;
+  try { parsed = JSON.parse(r.content); } catch { parsed = undefined; }
+  const evaluation = parsed !== undefined && !r.isError && body.when != null ? evaluatePredicate(body.when, parsed) : null;
+  return json(res, 200, { result: r.content, json: parsed !== undefined, truncated: false, isError: !!r.isError, code: r.isError ? 'PROBE_FAILED' : null, evaluation });
+}
 
 /** A fake run: a moment "running", then a report sealed to the profile's public key the way the server seals it. */
-function startRun(profile, t, trigger, dryRun) {
+function startRun(profile, t, trigger, dryRun, seed = null) {
   const run = {
     id: b64(crypto.randomBytes(12)), taskId: t.id, startedAt: new Date().toISOString(), finishedAt: null, status: 'running',
     dryRun, trigger, errorCode: null, errorMessage: null, toolCalls: 2, writes: t.definition.allowedWrites.length ? 1 : 0,
@@ -371,15 +450,23 @@ function startRun(profile, t, trigger, dryRun) {
   profile.runs.push(run);
   t.lastRunAt = run.startedAt;
   setTimeout(async () => {
-    const steps = [
-      { kind: 'tool', tool: 'get_emails', arguments: '{"folderId":"Inbox","take":10}', content: '{"items":[{"subject":"Invoice 1042","from":"billing@example.com"}]}', account: null, isError: false, simulated: false }
-    ];
-    if (t.definition.allowedWrites.length) {
+    const alert = t.definition.trigger?.action === 'alert';
+    const steps = seed
+      ? [{ kind: 'tool', tool: seed.tool, arguments: seed.arguments, account: seed.account, isError: false, simulated: false, seed: true,
+          content: JSON.stringify({ trigger: 'condition', conditionMet: seed.evaluation.value, matched: seed.evaluation.matched, truncated: seed.evaluation.truncated }) }]
+      : [];
+    if (!alert) steps.push({ kind: 'tool', tool: 'get_emails', arguments: '{"folderId":"Inbox","take":10}', content: '{"items":[{"subject":"Invoice 1042","from":"billing@example.com"}]}', account: null, isError: false, simulated: false });
+    if (!alert && t.definition.allowedWrites.length) {
       steps.push({ kind: 'tool', tool: t.definition.allowedWrites[0], arguments: '{}', content: dryRun ? '{"dryRun":true}' : '{"success":true}', account: null, isError: false, simulated: dryRun });
     }
     const transcript = {
       version: 1, taskName: t.definition.name, prompt: t.definition.prompt, model: t.definition.model, dryRun, startedAt: run.startedAt,
-      stop: 'completed', final: `**${t.definition.name}**\n\n- One unread message: *Invoice 1042* from billing@example.com.\n- Nothing needs an answer today.`,
+      stop: alert ? 'alert' : 'completed',
+      final: alert
+        ? `${dryRun ? '**Test run: nothing was emailed.** This is the alert it would send:\n\n' : ''}[SmarterMail Agent] ${t.definition.name}: ` +
+          `${seed?.evaluation.value ? 'condition met' : 'condition checked (not met)'}\n\nCondition: ${seed?.evaluation.description || ''}\n\n` +
+          (seed?.evaluation.matched || []).map((m, i) => `${i + 1}. ${m.path}\n   ${JSON.stringify(m.value)}`).join('\n')
+        : `**${t.definition.name}**\n\n- One unread message: *Invoice 1042* from billing@example.com.\n- Nothing needs an answer today.`,
       steps, error: null, emailed: !!t.definition.emailAccountId && !dryRun
     };
     run.transcript = await sealToPublicKey(Buffer.from(JSON.stringify(transcript)), profile.publicKey, `task-run|${profile.id}|${run.id}`);

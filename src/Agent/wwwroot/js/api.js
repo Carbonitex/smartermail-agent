@@ -381,6 +381,14 @@ export function markRunRead(runId) {
   return request('/tasks/runs/' + encodeURIComponent(runId) + '/read', { method: 'POST' });
 }
 
+/**
+ * POST /api/tasks/probe → { result, json, truncated, isError, code, evaluation: { value, matched, truncated, errors, description } | null }.
+ * "Test probe": runs a read tool now as one of this chat's live accounts and evaluates `when` against it.
+ */
+export function probeTask({ accountId, tool, arguments: args, when }) {
+  return request('/tasks/probe', { method: 'POST', body: { accountId, tool, arguments: args || {}, ...(when ? { when } : {}) } });
+}
+
 /** Absolute URL of the MCP endpoint, for an MCP client's config. */
 export const mcpUrl = () => location.origin + appRoot() + 'mcp';
 
