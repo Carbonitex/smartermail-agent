@@ -98,6 +98,22 @@ public sealed class DataStore
 
         // 2: a profile's own session idle timeout (minutes); NULL = the server's SESSION_IDLE_MINUTES.
         "ALTER TABLE profiles ADD COLUMN idle_minutes INTEGER;",
+
+        // 3: reserved: approvals (merged separately)
+        "SELECT 1;",
+
+        // 4: condition-triggered tasks (Tasks/Triggers). A condition task keeps next_run_at NULL, so the
+        // cron scheduler never picks it up; next_probe_at is non-NULL exactly for condition tasks.
+        // trigger_state is sealed with DATA_KEY; last_value is 0/1/NULL, for the task card.
+        """
+        ALTER TABLE tasks ADD COLUMN next_probe_at  INTEGER;
+        ALTER TABLE tasks ADD COLUMN last_probe_at  INTEGER;
+        ALTER TABLE tasks ADD COLUMN last_value     INTEGER;
+        ALTER TABLE tasks ADD COLUMN probe_failures INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN trigger_state  TEXT;
+        CREATE INDEX tasks_probe ON tasks(enabled, next_probe_at);
+        CREATE INDEX task_runs_trigger ON task_runs(task_id, trigger, started_at);
+        """,
     ];
 
     public DataStore(ServerOptions options, ILogger<DataStore> logger)

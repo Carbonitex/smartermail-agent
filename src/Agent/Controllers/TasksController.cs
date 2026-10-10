@@ -6,6 +6,7 @@ using SmarterMailAgent.Profiles;
 using SmarterMailAgent.Server;
 using SmarterMailAgent.Storage;
 using SmarterMailAgent.Tasks;
+using SmarterMailAgent.Tasks.Triggers;
 
 namespace SmarterMailAgent.Controllers;
 
@@ -28,13 +29,14 @@ public sealed class TasksController(
 {
     public sealed record TaskRequest(
         string? Name, string? Prompt, string? Cron, string? TimeZone, IReadOnlyList<string>? AccountIds,
-        IReadOnlyList<string>? AllowedWrites, int? MaxWrites, string? Model, string? EmailAccountId, bool Enabled = true);
+        IReadOnlyList<string>? AllowedWrites, int? MaxWrites, string? Model, string? EmailAccountId, bool Enabled = true,
+        TaskTrigger? Trigger = null);
 
     public sealed record RunRequest(bool DryRun);
 
     public sealed record TaskView(
         string Id, bool Enabled, string Status, int ConsecutiveFailures, DateTimeOffset? NextRunAt, DateTimeOffset? LastRunAt,
-        TaskDefinition? Definition);
+        TaskDefinition? Definition, TriggerStatus? Trigger = null);
 
     public sealed record RunView(
         string Id, string TaskId, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt, string Status, bool DryRun, string Trigger,
@@ -47,7 +49,8 @@ public sealed class TasksController(
         if (Gate(out var profileId, out var sealer) is { } refusal)
             return refusal;
 
-        var list = tasks.ForProfile(profileId).Select(t => View(t, sealer)).ToList();
+        var status = Triggers?.Status(profileId, DataStore.Now());
+        var list = tasks.ForProfile(profileId).Select(t => View(t, sealer, status?.GetValueOrDefault(t.Id))).ToList();
         return Ok(new { tasks = list, unread = tasks.UnreadCount(profileId) });
     }
 
@@ -62,13 +65,16 @@ public sealed class TasksController(
         var definition = Definition(request);
         if (Invalid(definition) is { } invalid)
             return invalid;
+        if (TriggerLimit(profileId, null, definition) is { } limited)
+            return limited;
 
         var id = ProfileCrypto.NewId(12);
         var now = DataStore.Now();
         tasks.Insert(new TaskRow(id, profileId, request.Enabled, definition.Seal(sealer, profileId, id),
             NextRun(definition, request.Enabled), "ok", 0, null, now, now));
+        AfterSave(profileId, id, definition);
         logger.LogInformation("Task {Task} created.", id);
-        return Ok(View(tasks.Get(profileId, id)!, sealer));
+        return Ok(View(tasks.Get(profileId, id)!, sealer, Triggers?.Status(profileId, now).GetValueOrDefault(id)));
     }
 
     [HttpPut("{id}")]
@@ -82,9 +88,12 @@ public sealed class TasksController(
         var definition = Definition(request);
         if (Invalid(definition) is { } invalid)
             return invalid;
+        if (TriggerLimit(profileId, id, definition) is { } limited)
+            return limited;
 
         tasks.Update(profileId, id, request.Enabled, definition.Seal(sealer, profileId, id), NextRun(definition, request.Enabled), "ok");
-        return Ok(View(tasks.Get(profileId, id)!, sealer));
+        AfterSave(profileId, id, definition);
+        return Ok(View(tasks.Get(profileId, id)!, sealer, Triggers?.Status(profileId, DataStore.Now()).GetValueOrDefault(id)));
     }
 
     [HttpDelete("{id}")]
@@ -97,12 +106,16 @@ public sealed class TasksController(
 
     /// <summary>Starts a run now (in the background). <c>dryRun</c>: writes are simulated, nothing is mailed.</summary>
     [HttpPost("{id}/run")]
-    public IActionResult Run(string id, [FromBody] RunRequest? request)
+    public async Task<IActionResult> Run(string id, [FromBody] RunRequest? request)
     {
-        if (Gate(out var profileId, out _) is { } refusal)
+        if (Gate(out var profileId, out var sealer) is { } refusal)
             return refusal;
         if (tasks.Get(profileId, id) is not { } task)
             return NotFound(new { error = "No such task.", code = "TASK_NOT_FOUND" });
+
+        // A condition task: probe once, then run (or alert) with that result, whether it holds or not.
+        if (TaskDefinition.Open(sealer, profileId, id, task.Definition) is { Trigger: not null } triggered)
+            return await TriggerEndpoints.RunNowAsync(this, services, task, triggered, request?.DryRun ?? false, HttpContext.RequestAborted);
 
         var scheduler = services.GetRequiredService<TaskRunScheduler>();
         if (!scheduler.RunNow(task, request?.DryRun ?? false, out var runId))
@@ -158,17 +171,28 @@ public sealed class TasksController(
         return null;
     }
 
+    private TriggerStore? Triggers => services.GetService<TriggerStore>();
+
+    /// <summary>409 TRIGGER_LIMIT when this would be one condition task too many for the profile.</summary>
+    private IActionResult? TriggerLimit(string profileId, string? id, TaskDefinition definition) =>
+        TriggerEndpoints.Limit(this, services, Triggers, profileId, id, definition);
+
+    /// <summary>A condition task gets its first probe and a fresh state; a cron task none.</summary>
+    private void AfterSave(string profileId, string id, TaskDefinition definition) =>
+        TriggerEndpoints.AfterSave(services, Triggers, profileId, id, definition);
+
     private static TaskDefinition Definition(TaskRequest r) => new(
         1,
         r.Name?.Trim() ?? "",
         r.Prompt?.Trim() ?? "",
-        r.Cron?.Trim() ?? "",
+        r.Trigger is null ? r.Cron?.Trim() ?? "" : "",
         string.IsNullOrWhiteSpace(r.TimeZone) ? "UTC" : r.TimeZone.Trim(),
         (r.AccountIds ?? []).Distinct(StringComparer.Ordinal).ToList(),
         (r.AllowedWrites ?? []).Distinct(StringComparer.Ordinal).ToList(),
         r.MaxWrites ?? 5,
         r.Model?.Trim() ?? "",
-        string.IsNullOrWhiteSpace(r.EmailAccountId) ? null : r.EmailAccountId);
+        string.IsNullOrWhiteSpace(r.EmailAccountId) ? null : r.EmailAccountId,
+        r.Trigger?.Normalized());
 
     /// <summary>Validated against the profile's delegated accounts, as this session's profile knows them.</summary>
     private IActionResult? Invalid(TaskDefinition definition)
@@ -180,7 +204,7 @@ public sealed class TasksController(
         var delegated = runtime.Rows
             .Where(r => r.Seal == ProfileStore.SealServer)
             .ToDictionary(r => r.Id, StringComparer.Ordinal);
-        var errors = definition.Validate(delegated, catalog, options.TaskMinInterval);
+        var errors = definition.Validate(delegated, catalog, options.TaskMinInterval, services.GetService<TriggerOptions>());
         return errors.Count == 0
             ? null
             : BadRequest(new { error = string.Join(" ", errors), errors, code = "TASK_INVALID" });
@@ -189,9 +213,9 @@ public sealed class TasksController(
     private static long? NextRun(TaskDefinition definition, bool enabled) =>
         enabled ? TaskDefinition.NextRun(definition.Cron, definition.TimeZone, DateTimeOffset.UtcNow)?.ToUnixTimeMilliseconds() : null;
 
-    private static TaskView View(TaskRow t, Sealer sealer) => new(
+    private static TaskView View(TaskRow t, Sealer sealer, TriggerStatus? trigger = null) => new(
         t.Id, t.Enabled, t.Status, t.ConsecutiveFailures, Time(t.NextRunAt), Time(t.LastRunAt),
-        TaskDefinition.Open(sealer, t.ProfileId, t.Id, t.Definition));
+        TaskDefinition.Open(sealer, t.ProfileId, t.Id, t.Definition), trigger);
 
     private static RunView RunOf(TaskRunRow r, bool withTranscript) => new(
         r.Id, r.TaskId, DateTimeOffset.FromUnixTimeMilliseconds(r.StartedAt), Time(r.FinishedAt), r.Status, r.DryRun, r.Trigger,

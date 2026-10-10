@@ -7,6 +7,7 @@ using SmarterMailAgent.Mcp;
 using SmarterMailAgent.Profiles;
 using SmarterMailAgent.Server;
 using SmarterMailAgent.Storage;
+using SmarterMailAgent.Tasks.Triggers;
 
 namespace SmarterMailAgent.Tasks;
 
@@ -38,7 +39,8 @@ public sealed class TaskRunner(
         string Stop, string? Final, IReadOnlyList<AgentLoop.Step> Steps, string? Error, bool Emailed);
 
     /// <summary>Starts a run row and runs it. <paramref name="runId"/> is the row the caller already reported.</summary>
-    public async Task RunAsync(TaskRow task, string runId, string trigger, bool dryRun, CancellationToken stopping)
+    /// <param name="seed">A condition task's probe evidence: the run's first tool result (never prompt text).</param>
+    public async Task RunAsync(TaskRow task, string runId, string trigger, bool dryRun, CancellationToken stopping, TriggerSeed? seed = null)
     {
         var started = DateTimeOffset.UtcNow;
         // Looked up before this run's own row exists; test runs never count as "the previous run".
@@ -85,11 +87,15 @@ public sealed class TaskRunner(
                 var gate = new ToolGate(definition!.AllowedWrites.ToHashSet(StringComparer.Ordinal), definition.MaxWrites, dryRun);
                 var context = new TaskToolContext(accounts, runtime, gate);
                 var zone = TaskDefinition.TryParseSchedule(definition.Cron, definition.TimeZone, out _, out var z) ? z : TimeZoneInfo.Utc;
+                if (definition.Trigger is not null)
+                    zone = TriggerSchedule.ZoneOf(definition.TimeZone);
                 var prompt = TaskPrompt.Build(definition.Name, accounts, definition.AllowedWrites, definition.MaxWrites, dryRun,
                     DateTimeOffset.UtcNow, zone, new TaskPrompt.History(
                         lastOk is null ? null : DateTimeOffset.FromUnixTimeMilliseconds(lastOk.StartedAt),
                         latest is not null && latest.Status != "ok" && (lastOk is null || latest.StartedAt > lastOk.StartedAt)
                             ? DateTimeOffset.FromUnixTimeMilliseconds(latest.StartedAt) : null));
+                if (seed is not null)
+                    prompt += "\n" + TriggerPrompt.Section(seed);
 
                 result = await loop.RunAsync(key, definition.Model, prompt, definition.Prompt, ToolsFor(accounts, gate.AllowedWrites),
                     async (name, arguments, ct) =>
@@ -98,7 +104,7 @@ public sealed class TaskRunner(
                         return new AgentLoop.ToolResult(ToolInvoker.Flatten(outcome.Result),
                             outcome.Status != ToolDispatcher.Status.Ok || (outcome.Result.IsError ?? false), outcome.Account, outcome.Simulated);
                     },
-                    options.TaskMaxToolRounds, timeout.Token, sessionId: $"sma-task-run-{runId}");
+                    options.TaskMaxToolRounds, timeout.Token, sessionId: $"sma-task-run-{runId}", seed: seed?.ToLoopSeed());
 
                 (status, code) = result.Stop switch
                 {
@@ -140,7 +146,7 @@ public sealed class TaskRunner(
                 tasks.FinishRun(runId, "failed", code, 0, 0, null, null, transcript);
             }
 
-            if (trigger == "schedule")
+            if (trigger is "schedule" or "condition")
                 tasks.RecordOutcome(task.Id, status == "ok", status == "ok" ? "ok" : code, PauseAfterFailures);
             tasks.Prune(task.Id, options.TaskRunRetention);
 
@@ -278,7 +284,7 @@ public sealed class TaskRunner(
         "LLM_KEY_REJECTED" => "OpenRouter rejected the key saved for scheduled tasks.",
         "NO_CREDITS" => "The OpenRouter account for scheduled tasks is out of credits.",
         "TIMEOUT" => "The run hit its time limit.",
-        _ => "The run failed.",
+        _ => TriggerCodes.Explain(code) ?? "The run failed.",
     };
 }
 

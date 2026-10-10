@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SmarterMailAgent.Auth;
 using SmarterMailAgent.Server;
+using SmarterMailAgent.Tasks.Triggers;
 
 namespace SmarterMailAgent.Controllers;
 
@@ -12,13 +13,16 @@ namespace SmarterMailAgent.Controllers;
 [ApiController]
 [Route("api/config")]
 [AllowAnonymous]
-public sealed class ConfigController(ServerOptions options, ResumeSealer sealer) : ControllerBase
+public sealed class ConfigController(ServerOptions options, ResumeSealer sealer, TriggerOptions triggers) : ControllerBase
 {
     public sealed record ResumeConfig(bool Enabled, int Days);
 
     public sealed record ProfilesConfig(bool Enabled);
 
-    public sealed record TasksConfig(bool Enabled, int MinIntervalMinutes, int MaxPerProfile, int MaxToolRounds);
+    public sealed record TasksConfig(bool Enabled, int MinIntervalMinutes, int MaxPerProfile, int MaxToolRounds, TriggersConfig? Triggers = null);
+
+    /// <summary>Condition-triggered tasks (<c>TRIGGERS_*</c>).</summary>
+    public sealed record TriggersConfig(bool Enabled, int MinIntervalMinutes, int MaxPerProfile, int MaxRunsPerDay);
 
     /// <param name="Mode"><c>server</c> or <c>browser</c> (BROWSER_ONLY_MODE).</param>
     public sealed record ConfigResponse(string Mode, ResumeConfig Resume, ProfilesConfig Profiles, TasksConfig Tasks);
@@ -29,5 +33,6 @@ public sealed class ConfigController(ServerOptions options, ResumeSealer sealer)
         new ResumeConfig(sealer.Enabled, sealer.Enabled ? (int)sealer.MaxAge.TotalDays : 0),
         new ProfilesConfig(options.ServerMode),
         new TasksConfig(options.TasksEnabled, (int)options.TaskMinInterval.TotalMinutes, options.TasksPerProfile,
-            options.TaskMaxToolRounds)));
+            options.TaskMaxToolRounds,
+            new TriggersConfig(triggers.Enabled, triggers.MinIntervalMinutes, triggers.PerProfile, triggers.MaxRunsPerDay))));
 }
