@@ -50,6 +50,15 @@ public sealed record ServerOptions
     /// <summary><c>MAX_PROFILES</c>: how many profiles this instance holds at most.</summary>
     public int MaxProfiles { get; init; } = 1000;
 
+    /// <summary>
+    /// <c>PROFILE_MAX_IDLE_MINUTES</c>: the longest session idle timeout a user may choose for their
+    /// profile (Settings). Sessions still end at <c>SESSION_MAX_HOURS</c> regardless.
+    /// </summary>
+    public int ProfileMaxIdleMinutes { get; init; } = 480;
+
+    /// <summary>The shortest idle timeout a profile may choose.</summary>
+    public const int ProfileMinIdleMinutes = 5;
+
     public bool TasksEnabledSetting { get; init; } = true;
 
     /// <summary>Scheduled tasks need the server key: they run while nobody is there to unlock anything.</summary>
@@ -107,6 +116,7 @@ public sealed record ServerOptions
                 .ToHashSet(StringComparer.Ordinal),
             ProfileIdleDays = Int(config, "PROFILE_IDLE_DAYS", 180),
             MaxProfiles = Int(config, "MAX_PROFILES", 1000),
+            ProfileMaxIdleMinutes = Math.Max(ProfileMinIdleMinutes, Int(config, "PROFILE_MAX_IDLE_MINUTES", 480)),
             TasksEnabledSetting = Bool(config, "TASKS_ENABLED", true),
             TaskConcurrency = Int(config, "TASK_CONCURRENCY", 2),
             TaskTimeout = TimeSpan.FromMinutes(Int(config, "TASK_TIMEOUT_MINUTES", 10)),

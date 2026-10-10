@@ -74,6 +74,10 @@ passkey is lost; more passkeys can be added from the **Profile** menu.
   accepts is listed as "sign in again"; signing in to it again keeps its place (and its tasks).
 - `PROFILE_MAIL_HOSTS` limits which mail servers' accounts may be saved, e.g. your own.
 - Profiles nobody opens for `PROFILE_IDLE_DAYS` are deleted.
+- Profile → Settings: how long a profile's sessions may sit idle (5 minutes up to
+  `PROFILE_MAX_IDLE_MINUTES`; the default is `SESSION_IDLE_MINUTES`), and whether accounts added
+  later start with changes allowed. Within the idle time, a new tab or a restarted browser opens the
+  profile without the passkey.
 - Browsers without PRF fall back to "Remember me on this device" when `RESUME_KEY` is set.
 
 ## Scheduled tasks (server mode with `DATA_KEY`)
@@ -114,6 +118,7 @@ All settings are optional.
 | `PUBLIC_ORIGIN` | unset | The site's origin, e.g. `https://mail-agent.example.com`. Passkeys are bound to its host. Unset = taken from each request |
 | `PROFILE_MAIL_HOSTS` | unset | Comma-separated mail server host names whose accounts may be saved to profiles. Unset = any |
 | `PROFILE_IDLE_DAYS` | `180` | Delete profiles nobody has opened for this long |
+| `PROFILE_MAX_IDLE_MINUTES` | `480` | Longest session idle timeout a user may choose for their profile (sessions still end at `SESSION_MAX_HOURS`) |
 | `MAX_PROFILES` | `1000` | Profiles this instance holds at most |
 | `TASKS_ENABLED` | `true` | `false` switches scheduled tasks off |
 | `TASK_CONCURRENCY` | `2` | Task runs at once |

@@ -129,6 +129,21 @@ public sealed class ProfileStore(DataStore db)
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>The profile's own session idle timeout in minutes; null = the server default.</summary>
+    public int? IdleMinutes(string id)
+    {
+        using var c = db.Open();
+        using var cmd = c.Command("SELECT idle_minutes FROM profiles WHERE id = $id", ("$id", id));
+        return cmd.ExecuteScalar() is long minutes ? (int)minutes : null;
+    }
+
+    public void SetIdleMinutes(string id, int? minutes)
+    {
+        using var c = db.Open();
+        using var cmd = c.Command("UPDATE profiles SET idle_minutes = $m WHERE id = $id", ("$m", minutes), ("$id", id));
+        cmd.ExecuteNonQuery();
+    }
+
     public void DeleteProfile(string id)
     {
         using var c = db.Open();

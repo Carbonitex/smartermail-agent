@@ -55,6 +55,15 @@ public sealed class ProfileController(
 
     public sealed record PausedRequest(bool Paused);
 
+    /// <param name="Minutes">Null = the server default.</param>
+    public sealed record IdleRequest(int? Minutes);
+
+    /// <summary>
+    /// The session idle timeout: the profile's own choice (null = none), what it falls back to, and
+    /// the range it may choose from.
+    /// </summary>
+    public sealed record IdleView(int? Minutes, int DefaultMinutes, int MinMinutes, int MaxMinutes);
+
     /// <summary>What a passkey or recovery sign-in hands the browser: the wrapped profile key, to open locally.</summary>
     public sealed record SignInResponse(string ProfileId, string WrappedKey, string? CredentialId, SessionResponse Session);
 
@@ -71,7 +80,7 @@ public sealed class ProfileController(
     public sealed record ProfileView(
         string Id, bool Unlocked, IReadOnlyList<PasskeyView> Passkeys, IReadOnlyList<StoredAccountView> Accounts,
         bool Recovery, string PublicKey, string EncryptedPrivateKey, long SettingsVersion,
-        bool CanDelegate, bool TasksEnabled, bool HasTaskKey, bool TasksPaused);
+        bool CanDelegate, bool TasksEnabled, bool HasTaskKey, bool TasksPaused, IdleView Idle);
 
     // ------------------------------------------------------------------ creation
 
@@ -431,6 +440,30 @@ public sealed class ProfileController(
         return Ok(View(session, store.GetProfile(profile.Id)!));
     }
 
+    /// <summary>
+    /// The profile's session idle timeout, applied at once to every session of it. <c>400
+    /// IDLE_OUT_OF_RANGE</c> outside <c>5</c> to <c>PROFILE_MAX_IDLE_MINUTES</c>.
+    /// </summary>
+    [HttpPut("idle")]
+    [Authorize(Policy = "SessionAccess")]
+    public IActionResult PutIdle([FromBody] IdleRequest request)
+    {
+        if (ProfileOf(out var session, out var profile) is { } refusal)
+            return refusal;
+        if (request.Minutes is { } m && (m < ServerOptions.ProfileMinIdleMinutes || m > options.ProfileMaxIdleMinutes))
+        {
+            return BadRequest(new
+            {
+                error = $"Choose between {ServerOptions.ProfileMinIdleMinutes} and {options.ProfileMaxIdleMinutes} minutes.",
+                code = "IDLE_OUT_OF_RANGE",
+            });
+        }
+
+        registry.SetIdleMinutes(profile.Id, request.Minutes);
+        session.Touch();
+        return Ok(View(session, profile));
+    }
+
     /// <summary>Deletes the profile: every account is revoked on SmarterMail, every session of it ends, and its rows go.</summary>
     [HttpDelete]
     [Authorize(Policy = "SessionAccess")]
@@ -484,7 +517,9 @@ public sealed class ProfileController(
             runtime.CanDelegate,
             options.TasksEnabled,
             profile.TaskLlmKey is not null,
-            profile.TasksPaused);
+            profile.TasksPaused,
+            new IdleView(store.IdleMinutes(profile.Id), (int)SessionStore.IdleTimeout.TotalMinutes,
+                ServerOptions.ProfileMinIdleMinutes, options.ProfileMaxIdleMinutes));
     }
 
     /// <summary>The request's profile session and its row, or the refusal to send instead.</summary>

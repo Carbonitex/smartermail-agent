@@ -77,8 +77,11 @@ public sealed class Session : IAsyncDisposable
 
     public DateTimeOffset ExpiresAt(TimeSpan maxAge) => CreatedAt + maxAge;
 
+    /// <summary>A profile session follows its profile's idle timeout when it set one; anything else, <paramref name="fallback"/>.</summary>
+    public TimeSpan IdleTimeout(TimeSpan fallback) => Profile?.IdleTimeout ?? fallback;
+
     public bool IsExpired(TimeSpan idle, TimeSpan maxAge) =>
-        DateTimeOffset.UtcNow - LastSeenAt > idle || DateTimeOffset.UtcNow - CreatedAt > maxAge;
+        DateTimeOffset.UtcNow - LastSeenAt > IdleTimeout(idle) || DateTimeOffset.UtcNow - CreatedAt > maxAge;
 
     /// <summary>When the session's MCP token lapses; null when it has none (or it already lapsed).</summary>
     public DateTimeOffset? McpTokenExpiresAt

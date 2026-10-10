@@ -359,7 +359,7 @@ header (seconds): too many failed sign-ins to **that mail server** from this ser
 [Per-server failed-login cap](#per-server-failed-login-cap)). Refused before SmarterMail is called;
 `error` is user-facing ("… Try again in N minutes."). The per-IP limiters' own `429` has no body.
 
-`SessionResponse` = `{ expiresAt, maxAccounts, remembered, accounts: [{ id, handle, role, username, emailAddress, domain, baseUrl, readOnly }], mcpToken: { active, expiresAt }, profile: { id, unlocked } | null }`,
+`SessionResponse` = `{ expiresAt, maxAccounts, remembered, accounts: [{ id, handle, role, username, emailAddress, domain, baseUrl, readOnly }], mcpToken: { active, expiresAt }, profile: { id, unlocked, idleMinutes } | null }`,
 `role` ∈ `"User" | "DomainAdmin" | "SysAdmin"`; `remembered` = "Remember me on this device" is on;
 `mcpToken.expiresAt` is `null` when no token is active.
 
@@ -526,7 +526,7 @@ what makes a failure diagnosable.
 - Id: 32 random bytes, base64url. Cookie `sma_session`: HttpOnly, Secure, SameSite=Strict,
   `Path=<PATH_BASE>/`, MaxAge 12 h. (`Secure` is relaxed only when `ALLOW_PRIVATE_HOSTS=true` on a
   plain-http request, for local development.)
-- Idle timeout 30 min, absolute 12 h, **per session**. `SessionSweeper` runs every minute: it
+- Idle timeout 30 min (a profile may choose its own, below), absolute 12 h, **per session**. `SessionSweeper` runs every minute: it
   disposes expired sessions (and every account in them), refreshes each account's token in memory,
   and drops **only the account** whose refresh fails. A session left with no accounts is removed.
   Remembered sessions are only expired by the sweeper, never refreshed (see
@@ -727,7 +727,7 @@ Made in the browser (`js/vault.js`), HKDF-SHA-256 with a zero salt:
 | Key | From | Where it goes |
 |---|---|---|
 | profile key PK | 32 random bytes | wrapped (AES-GCM) under each passkey's PRF output (`sma-profile-wrap-v1`, PRF salt `smartermail-agent profile v1`) and optionally a recovery code (`sma-recovery-wrap-v1`); the wraps are stored, PK never leaves the browser |
-| settings key | `HKDF(PK, sma-settings-v1)` | never leaves the browser; encrypts `{ openRouterKey, model, toolsOff }` |
+| settings key | `HKDF(PK, sma-settings-v1)` | never leaves the browser; encrypts `{ openRouterKey, model, toolsOff, allowChanges }`. Until the profile's idle timeout passes without activity (any successful request from a page holding the keys, like the server's idle clock) after the passkey or recovery code was used, it and the inbox key are kept in IndexedDB (`sma-profile`) as non-extractable `CryptoKey`s, so a reload, new tab or restarted browser on the still-unlocked profile session reopens the settings without the key prompt (`profile.reopenWarm`); cleared on logout and profile deletion |
 | accounts key | `HKDF(PK, sma-accounts-v1)`, raw | sent to `unlock`; `ProfileRuntime` keeps it (as a `Sealer`) while a session of the profile lives; the server stores only `HMAC(key, "sma-accounts-check-v1")` |
 | inbox key | `HKDF(PK, sma-inbox-v1)` | encrypts the PKCS#8 private half of a P-256 key pair; the public half is stored, and `ProfileCrypto.SealToPublicKey` seals every run transcript to it |
 | recovery auth | `HKDF(code secret, sma-recovery-auth-v1)` | sent to `recover`; the server stores its SHA-256 |
@@ -768,7 +768,12 @@ same login reuses the row id (`RowForLogin`), which tasks refer to.
   `RestoreAsync` refreshes every row it can open (`AccountRestorer`: SSRF guard, per-server throttle,
   a throttled server is skipped as `THROTTLED`), saves the rotated tokens, and answers
   `{ session, skipped }` with resume's reasons.
-- `GET /api/profile` (passkeys, accounts live / stored / delegated, task settings),
+- `GET /api/profile` (passkeys, accounts live / stored / delegated, task settings, `idle: { minutes,
+  defaultMinutes, minMinutes, maxMinutes }`), `PUT /api/profile/idle { minutes | null }` (the profile's
+  session idle timeout, 5 to `PROFILE_MAX_IDLE_MINUTES`, `400 IDLE_OUT_OF_RANGE`; stored in
+  `profiles.idle_minutes`, held on `ProfileRuntime.IdleTimeout`, applied at once to every session of the
+  profile and reported as `SessionResponse.profile.idleMinutes`, which the browser also uses for how long
+  it keeps the keys),
   `GET|PUT /api/profile/settings` (opaque blob, optimistic `version`, `409 SETTINGS_STALE`),
   `POST /api/profile/passkeys/options` + `POST /api/profile/passkeys`, `DELETE /api/profile/passkeys/{id}`
   (`409 LAST_PASSKEY`), `PUT /api/profile/recovery`, `PUT /api/profile/accounts/{id}/delegation`,
@@ -977,7 +982,7 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 | `DATA_DIR` | `./data` (`/data` in the image) | server mode: the SQLite file; startup fails if not writable |
 | `DATA_KEY` / `DATA_KEY_PREVIOUS` | unset | server key (32 bytes, base64); unset = no delegation, no tasks. Malformed fails startup |
 | `PUBLIC_ORIGIN` | unset | passkey origin / RP id; unset = from the request (passkeys need a host name, not an IP) |
-| `PROFILE_MAIL_HOSTS`, `PROFILE_IDLE_DAYS` (180), `MAX_PROFILES` (1000) | | profile limits |
+| `PROFILE_MAIL_HOSTS`, `PROFILE_IDLE_DAYS` (180), `MAX_PROFILES` (1000), `PROFILE_MAX_IDLE_MINUTES` (480) | | profile limits; the last is the longest session idle timeout a profile may choose |
 | `TASKS_ENABLED` (true), `TASK_CONCURRENCY` (2), `TASK_TIMEOUT_MINUTES` (10), `TASK_MAX_TOOL_ROUNDS` (15), `TASK_MIN_INTERVAL_MINUTES` (15), `TASKS_PER_PROFILE` (10), `TASK_RUN_RETENTION` (50), `LLM_BASE_URL` | | scheduled tasks |
 | `PATH_BASE` | `/` | path prefix, e.g. `/mail-agent` when a reverse proxy serves it under one |
 | `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` / `-Proto` are believed. Unset = forwarded headers ignored; limits key off the TCP peer. A malformed entry fails startup |

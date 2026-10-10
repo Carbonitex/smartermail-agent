@@ -95,6 +95,9 @@ public sealed class DataStore
         );
         CREATE INDEX task_runs_task ON task_runs(task_id, started_at);
         """,
+
+        // 2: a profile's own session idle timeout (minutes); NULL = the server's SESSION_IDLE_MINUTES.
+        "ALTER TABLE profiles ADD COLUMN idle_minutes INTEGER;",
     ];
 
     public DataStore(ServerOptions options, ILogger<DataStore> logger)

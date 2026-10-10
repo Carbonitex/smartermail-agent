@@ -24,8 +24,11 @@ public sealed record AccountResponse(
 /// <summary>Whether the session has a live MCP token. The token itself is only ever shown once.</summary>
 public sealed record McpTokenState(bool Active, DateTimeOffset? ExpiresAt);
 
-/// <summary>Server mode: the profile this session belongs to, and whether its accounts are unlocked.</summary>
-public sealed record ProfileState(string Id, bool Unlocked);
+/// <summary>
+/// Server mode: the profile this session belongs to, whether its accounts are unlocked, and the idle
+/// timeout its sessions follow (minutes; the browser keeps the profile's keys for as long).
+/// </summary>
+public sealed record ProfileState(string Id, bool Unlocked, int IdleMinutes);
 
 /// <param name="Remembered">"Remember me on this device" is on: the browser keeps a resume bundle.</param>
 /// <param name="Profile">The session's profile (server mode); null for an ordinary session.</param>
@@ -39,7 +42,8 @@ public sealed record SessionResponse(
         session.Accounts.Select(AccountResponse.From).ToList(),
         session.McpTokenExpiresAt is { } expiresAt ? new(true, expiresAt) : new(false, null),
         session.IsRemembered,
-        session.Profile is { } profile ? new ProfileState(profile.ProfileId, profile.IsUnlocked) : null);
+        session.Profile is { } profile ? new ProfileState(profile.ProfileId, profile.IsUnlocked,
+            (int)session.IdleTimeout(SessionStore.IdleTimeout).TotalMinutes) : null);
 }
 
 /// <summary>

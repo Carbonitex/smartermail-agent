@@ -54,6 +54,11 @@ export function trackResumeVersion(source, onNewer) {
   resumeVersionHandler = onNewer;
 }
 
+let activityHandler = null;
+
+/** fn() after every successful request: the server counted it as session activity. */
+export function onActivity(fn) { activityHandler = fn; }
+
 async function request(path, { method = 'GET', body, signal } = {}) {
   const headers = body === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' };
   if (resumeVersionSource) headers[RESUME_HEADER] = String(resumeVersionSource() || 0);
@@ -89,6 +94,7 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     if (res.status === 401 && unauthorizedHandler) unauthorizedHandler(err);
     throw err;
   }
+  if (activityHandler) activityHandler();
   return data;
 }
 
@@ -320,6 +326,11 @@ export function setDelegation(accountId, enabled) {
 /** PUT /api/profile/task-key → the profile view. The OpenRouter key scheduled tasks use; null clears it. */
 export function setTaskKey(key) {
   return request('/profile/task-key', { method: 'PUT', body: { key: key || null } });
+}
+
+/** PUT /api/profile/idle → the profile view; minutes null = the server default. 400 IDLE_OUT_OF_RANGE. */
+export function setProfileIdle(minutes) {
+  return request('/profile/idle', { method: 'PUT', body: { minutes } });
 }
 
 export function setTasksPaused(paused) {

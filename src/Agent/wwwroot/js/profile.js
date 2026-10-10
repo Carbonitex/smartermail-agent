@@ -12,9 +12,15 @@
  *            the stored accounts come back, and the settings are opened here.
  *
  * The profile key and what derives from it stay in this module's memory for
- * the page's lifetime (they are equally sensitive). A reload keeps the server
- * session (cookie) but not the keys: chatting works, and saving settings or
- * reading task results asks for the passkey again (a fresh sign-in).
+ * the page's lifetime (they are equally sensitive). Until the profile's idle
+ * timeout passes without activity (a successful request from a page holding
+ * the keys: the same clock as the server's) after the passkey or recovery code
+ * was used,
+ * the settings and inbox keys are also
+ * kept in IndexedDB as non-extractable CryptoKeys, so a reload, a new tab or a
+ * restarted browser on a still-unlocked profile session reopens the settings
+ * (the OpenRouter key) without asking again. PK and the accounts key are never
+ * kept: adding a passkey or a recovery code still needs a fresh sign-in.
  * `sma.profileHint` in localStorage only remembers that this browser has a
  * profile here (to lead with "Sign in with passkey"); it holds no secret.
  */
@@ -25,6 +31,10 @@ import { createPasskey, getPasskey, NoPrfError } from './passkey.js';
 
 const HINT = 'sma.profileHint';
 const OPTIONS_MAX_AGE_MS = 90_000;   // server ceremonies live two minutes
+const WARM_DEFAULT_MS = 30 * 60_000; // until the server says otherwise (SessionResponse.profile.idleMinutes)
+const WARM_TOUCH_MS = 60_000;        // activity moves the deadline at most this often
+const WARM_DB = 'sma-profile';
+const WARM_STORE = 'keys';
 
 let config = null;
 let keys = null;              // { accountsKey, settingsKey, inboxKey } while unlocked on this page
@@ -33,6 +43,9 @@ let inboxPrivateKey = null;   // CryptoKey, opened on first use
 let settingsVersion = 0;
 let loginOptions = null;      // { at, promise } prefetched for the passkey button
 let registerOptions = null;
+let warmProfileId = null;     // the profile whose keys this page keeps warm
+let warmTouchedAt = 0;
+let warmMs = WARM_DEFAULT_MS;  // the profile's idle timeout: a new page reopens the settings within it
 
 /* ---------------------------------------------------------------- config */
 
@@ -82,6 +95,93 @@ export function lock() {
   profileKey = null;
   inboxPrivateKey = null;
   settingsVersion = 0;
+  warmProfileId = null;
+}
+
+/* ------------------------------------------------------------ warm keys */
+
+function warmDb() {
+  return new Promise((resolve, reject) => {
+    const req = globalThis.indexedDB.open(WARM_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(WARM_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function warmOp(mode, fn) {
+  const db = await warmDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(WARM_STORE, mode);
+      const req = fn(tx.objectStore(WARM_STORE));
+      tx.oncomplete = () => resolve(req.result);
+      tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Keeps the settings and inbox keys (non-extractable) for WARM_MS from now. Best effort. */
+async function keepWarm(profileId) {
+  if (!keys || !profileId) return;
+  warmProfileId = profileId;
+  warmTouchedAt = Date.now();
+  const entry = { v: 1, profileId, until: warmTouchedAt + warmMs, settingsKey: keys.settingsKey, inboxKey: keys.inboxKey };
+  try { await warmOp('readwrite', (s) => s.put(entry, 'current')); } catch { /* IndexedDB unavailable */ }
+}
+
+/**
+ * Follows the session's profile idle timeout (Settings). A change applies to
+ * the kept keys at once, so a shorter timeout also shortens the current window.
+ */
+export function followSession(session) {
+  const minutes = session && session.profile && session.profile.idleMinutes;
+  const ms = Number.isFinite(minutes) && minutes > 0 ? minutes * 60_000 : WARM_DEFAULT_MS;
+  if (ms === warmMs) return;
+  warmMs = ms;
+  if (keys && warmProfileId) keepWarm(warmProfileId);
+}
+
+/** Activity on a page holding the keys: the kept keys last the idle timeout from now (at most once a minute). */
+export function touchWarm() {
+  if (!keys || !warmProfileId || Date.now() - warmTouchedAt < WARM_TOUCH_MS) return;
+  keepWarm(warmProfileId);
+}
+
+/** Forgets the kept keys (logout, profile deleted). The in-memory keys are lock()'s job. */
+export async function forgetWarm() {
+  try { await warmOp('readwrite', (s) => s.delete('current')); } catch { /* IndexedDB unavailable */ }
+}
+
+/**
+ * On a new page with an unlocked profile session: the kept keys, if this
+ * browser was active on the profile within its idle timeout, take this page's keys and open the
+ * profile's settings. Resolves the settings, or null (nothing kept, expired,
+ * another profile, unreadable).
+ */
+export async function reopenWarm(profileId) {
+  let entry = null;
+  try { entry = await warmOp('readonly', (s) => s.get('current')); } catch { return null; }
+  if (!entry || entry.v !== 1) return null;
+  if (entry.profileId !== profileId || !(entry.until > Date.now())) {
+    await forgetWarm();
+    return null;
+  }
+  lock();
+  keys = { settingsKey: entry.settingsKey, inboxKey: entry.inboxKey };
+  try {
+    const stored = await api.profileSettings();
+    settingsVersion = stored.version || 0;
+    const settings = await openSettings(stored.settings);
+    if (!settings) { lock(); await forgetWarm(); return null; }
+    await keepWarm(profileId);
+    return settings;
+  } catch {
+    lock();
+    return null;
+  }
 }
 
 /* --------------------------------------------------------------- options */
@@ -113,7 +213,7 @@ async function take(slot, fetchFresh) {
 
 /* ------------------------------------------------------------- settings */
 
-/** What the profile keeps for the chat: { openRouterKey, model, toolsOff: [...] }. */
+/** What the profile keeps for the chat: { openRouterKey, model, toolsOff: [...], allowChanges }. */
 async function openSettings(sealed) {
   if (!sealed || !keys) return null;
   try {
@@ -129,9 +229,10 @@ async function openSettings(sealed) {
  * across browsers: on SETTINGS_STALE the server's version is taken and the
  * write retried once. False when this page does not hold the keys.
  */
-export async function saveSettings({ openRouterKey, model, toolsOff }) {
+export async function saveSettings({ openRouterKey, model, toolsOff, allowChanges }) {
   if (!keys) return false;
-  const sealed = await vault.sealJson(keys.settingsKey, { v: 1, openRouterKey: openRouterKey || '', model: model || '', toolsOff: [...(toolsOff || [])] });
+  const sealed = await vault.sealJson(keys.settingsKey,
+    { v: 1, openRouterKey: openRouterKey || '', model: model || '', toolsOff: [...(toolsOff || [])], allowChanges: !!allowChanges });
   try {
     settingsVersion = (await api.saveProfileSettings(sealed, settingsVersion)).version;
   } catch (err) {
@@ -155,6 +256,7 @@ async function unlockWith(pk, signIn) {
   settingsVersion = stored.version || 0;
   const settings = await openSettings(stored.settings);
   setHint(signIn.profileId, accountLabel(unlocked.session));
+  await keepWarm(signIn.profileId);
   return { session: unlocked.session, skipped: unlocked.skipped || [], settings };
 }
 
@@ -214,6 +316,7 @@ export async function createProfile({ settings, label, withRecovery = true }) {
   profileKey = pk;
   settingsVersion = 1;
   setHint(profileId, label || accountLabel(session));
+  await keepWarm(profileId);
   return { session, recoveryCode };
 }
 

@@ -60,6 +60,18 @@ public sealed class ProfileRuntime
 
     public bool CanDelegate => _serverSealer is not null;
 
+    private long _idleTicks;
+
+    /// <summary>
+    /// The profile's own session idle timeout (Settings), already clamped to what the server allows;
+    /// null = the server default. Every session of the profile follows it, including ones already open.
+    /// </summary>
+    public TimeSpan? IdleTimeout
+    {
+        get => Interlocked.Read(ref _idleTicks) is > 0 and var ticks ? TimeSpan.FromTicks(ticks) : null;
+        internal set => Interlocked.Exchange(ref _idleTicks, value?.Ticks ?? 0);
+    }
+
     /// <summary>Checks <paramref name="accountsKey"/> against the stored check value and keeps it while unlocked.</summary>
     public bool Unlock(byte[] accountsKey, string storedCheck)
     {
@@ -357,6 +369,7 @@ public sealed class ProfileRuntime
 public sealed class ProfileRegistry
 {
     private readonly ProfileStore _store;
+    private readonly ServerOptions _options;
     private readonly ILoggerFactory _loggers;
     private readonly Dictionary<string, ProfileRuntime> _live = new(StringComparer.Ordinal);
     private readonly object _lock = new();
@@ -364,6 +377,7 @@ public sealed class ProfileRegistry
     public ProfileRegistry(ProfileStore store, ServerOptions options, ILoggerFactory loggers)
     {
         _store = store;
+        _options = options;
         _loggers = loggers;
         ServerSealer = options.DataKey is { } key ? new Sealer(key, options.DataKeyPrevious) : null;
     }
@@ -392,7 +406,10 @@ public sealed class ProfileRegistry
         {
             if (!_live.TryGetValue(profileId, out var runtime))
             {
-                runtime = new ProfileRuntime(profileId, this, _store, ServerSealer, _loggers.CreateLogger<ProfileRuntime>());
+                runtime = new ProfileRuntime(profileId, this, _store, ServerSealer, _loggers.CreateLogger<ProfileRuntime>())
+                {
+                    IdleTimeout = ClampIdle(_store.IdleMinutes(profileId)),
+                };
                 _live[profileId] = runtime;
             }
 
@@ -403,6 +420,20 @@ public sealed class ProfileRegistry
             return runtime;
         }
     }
+
+    /// <summary>Stores a profile's idle timeout (null = the server default) and applies it to its live sessions.</summary>
+    public void SetIdleMinutes(string profileId, int? minutes)
+    {
+        _store.SetIdleMinutes(profileId, minutes);
+        if (Find(profileId) is { } runtime)
+            runtime.IdleTimeout = ClampIdle(minutes);
+    }
+
+    /// <summary>A stored value within today's limits (the operator may have lowered the maximum since).</summary>
+    private TimeSpan? ClampIdle(int? minutes) =>
+        minutes is { } m
+            ? TimeSpan.FromMinutes(Math.Clamp(m, ServerOptions.ProfileMinIdleMinutes, _options.ProfileMaxIdleMinutes))
+            : null;
 
     /// <returns>Whether that was the last session, and whether nothing holds the runtime any more.</returns>
     internal (bool LastSession, bool Empty) Release(ProfileRuntime runtime, bool task)

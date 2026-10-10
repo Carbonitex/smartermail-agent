@@ -33,6 +33,7 @@ const state = {
   tools: [],            // OpenAI-shaped definitions actually sent (after the Tools filter)
   toolNames: [],
   disabled: new Set(),  // tool categories switched off in the Tools menu
+  allowChangesDefault: false,   // profile setting: accounts added to a profile chat start read-write
   addMode: false,       // the login view is adding an account to the live chat
   messages: [],         // OpenAI message array, in memory only
   busy: false,
@@ -147,6 +148,7 @@ api.onUnauthorized((err) => {
 });
 
 api.trackResumeVersion(() => resume.store.version, onNewerBundle);
+api.onActivity(() => profile.touchWarm());
 
 init();
 
@@ -170,6 +172,12 @@ async function init() {
   // A cookie may still be valid (reload / back button).
   try {
     const s = await api.session();
+    // A profile unlocked by a passkey in the last half hour (another tab, a
+    // reload, a restarted browser) reopens its settings without the key prompt.
+    if (s && s.profile && s.profile.unlocked && !profile.hasKeys()) {
+      const settings = await profile.reopenWarm(s.profile.id);
+      if (settings) applyProfileSettings(settings);
+    }
     if (await enterSession(s, 'Signed in to SmarterMail already — paste your OpenRouter key to continue.')) return;
   } catch {
     /* not signed in — normal */
@@ -221,7 +229,8 @@ function currentSettings() {
   return {
     openRouterKey: storage.openRouterKey,
     model: el.modelSelect.value || storage.model || DEFAULT_MODEL,
-    toolsOff: [...state.disabled]
+    toolsOff: [...state.disabled],
+    allowChanges: !!state.allowChangesDefault
   };
 }
 
@@ -230,6 +239,14 @@ function syncProfileSettings() {
   if (!state.session || !state.session.profile || !profile.hasKeys()) return;
   profile.saveSettings(currentSettings())
     .catch((err) => addNotice(`Could not save your settings to the profile: ${err.message}`, 'warn'));
+}
+
+/** Settings opened from a profile take over this tab's. */
+function applyProfileSettings(settings) {
+  if (settings.openRouterKey) { storage.openRouterKey = settings.openRouterKey; el.key.value = settings.openRouterKey; }
+  if (settings.model) storage.model = settings.model;
+  if (Array.isArray(settings.toolsOff)) { state.disabled = new Set(settings.toolsOff); storage.disabledCategories = state.disabled; }
+  if (typeof settings.allowChanges === 'boolean') state.allowChangesDefault = settings.allowChanges;
 }
 
 const profileHooks = {
@@ -242,13 +259,23 @@ const profileHooks = {
   },
   closeOtherPopovers: () => { closeToolsPopover(); closeMcpPopover(); closeDevicePopover(); },
 
+  /** Settings: the profile's idle timeout changed (the view's effective value, in minutes). */
+  onIdleChanged(minutes) {
+    if (!state.session || !state.session.profile) return;
+    state.session = { ...state.session, profile: { ...state.session.profile, idleMinutes: minutes } };
+    profile.followSession(state.session);
+  },
+
+  /** Settings: whether accounts added to this profile chat may make changes by default. */
+  getAllowChanges: () => !!state.allowChangesDefault,
+  setAllowChanges(value) {
+    state.allowChangesDefault = !!value;
+    syncProfileSettings();
+  },
+
   /** A passkey or recovery-code sign-in: settings back from the profile, then into the chat. */
   async onSignedIn({ session, skipped, settings }) {
-    if (settings) {
-      if (settings.openRouterKey) { storage.openRouterKey = settings.openRouterKey; el.key.value = settings.openRouterKey; }
-      if (settings.model) storage.model = settings.model;
-      if (Array.isArray(settings.toolsOff)) { state.disabled = new Set(settings.toolsOff); storage.disabledCategories = state.disabled; }
-    }
+    if (settings) applyProfileSettings(settings);
     forgetDevice();   // a profile chat is remembered by the profile, not by this browser
     const notices = skippedNotices(skipped);
     if (!sessionAccounts(session).length) {
@@ -275,6 +302,7 @@ const profileHooks = {
   onEnded(message) {
     storage.clear();
     state.disabled = new Set();
+    state.allowChangesDefault = false;
     el.key.value = '';
     showLogin(message);
   }
@@ -343,7 +371,8 @@ function showAddAccount(message) {
   if (!el.hostname.value && first) el.hostname.value = hostOf(first.baseUrl);
   el.email.value = '';
   el.password.value = '';
-  el.allowChanges.checked = false;
+  // A profile may choose to start new accounts read-write (Profile → Settings); otherwise read-only.
+  el.allowChanges.checked = !!(state.session.profile && state.allowChangesDefault);
   setLoginError(message || '');
   el.chatView.hidden = true;
   el.tfaView.hidden = true;
@@ -661,6 +690,7 @@ async function enterChat(session) {
   stopTfaCountdown();
   state.twoFactor = null;
   state.session = session;
+  profile.followSession(session);
   state.queue = [];
   state.toolList = [];
   state.tools = [];
@@ -716,6 +746,7 @@ async function applySession(next, { added = false, removed = null } = {}) {
   const before = sessionAccounts(state.session);
   const after = sessionAccounts(next);
   state.session = next;
+  profile.followSession(next);
   renderAccounts();
   renderMcpMenu();
   renderDeviceMenu();
@@ -893,7 +924,7 @@ async function syncSession() {
   }
   const ids = (s) => sessionAccounts(s).map((a) => `${a.id}:${a.readOnly}`).sort().join('|');
   if (next && ids(next) !== ids(state.session)) await applySession(next);
-  else if (next) { state.session = next; renderMcpMenu(); }
+  else if (next) { state.session = next; profile.followSession(next); renderMcpMenu(); }
   renderDeviceMenu();
   refreshTasksBadge();
 }
@@ -1491,7 +1522,9 @@ function wireChat() {
     storage.clear();
     forgetDevice();   // the server revoked the tokens; the saved copy is dead anyway
     profile.lock();
+    await profile.forgetWarm();
     state.disabled = new Set();
+    state.allowChangesDefault = false;
     el.password.value = '';
     el.key.value = '';
     showLogin(wasProfile

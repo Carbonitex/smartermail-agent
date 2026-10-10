@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Agent (server mode): a Settings section in the Profile menu. A profile chooses its own session
+  idle timeout (5 minutes up to the new `PROFILE_MAX_IDLE_MINUTES`, default 480), applied at once to
+  every session of it, and whether accounts added to it start with changes allowed.
+
 - `upload_attachment` takes the file as `base64Content` or `text` (with `fileName`), so remote
   clients can attach files they have. New `inline=true` embeds an image: SmarterMail assigns the
   content ID and the tool returns it as `htmlReference` (`cid:…`).
@@ -26,6 +30,10 @@ All notable changes to this project are documented here. The format follows
   but its own, so custom IDs never worked.
 
 ### Fixed
+
+- Agent: after a passkey sign-in, until the profile's idle timeout passes without activity, a new tab, a reload or a restarted browser on the
+  same unlocked profile goes straight back into the chat. Before, it asked for the OpenRouter key
+  again, which the profile already stores.
 
 - Agent: tool cards no longer collapse into thin lines once a chat is taller than the window.
 - Agent: dismissing a password manager's passkey prompt (e.g. LastPass) no longer fails the

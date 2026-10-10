@@ -37,7 +37,12 @@ export function config(resumeEnabled, resumeDays) {
   };
 }
 
-export const profileState = (s) => (s && s.profileId ? { id: s.profileId, unlocked: !!s.unlocked } : null);
+const IDLE_DEFAULT = 30;
+const IDLE_MAX = 480;
+
+export const profileState = (s) => (s && s.profileId
+  ? { id: s.profileId, unlocked: !!s.unlocked, idleMinutes: profiles.get(s.profileId)?.idleMinutes ?? IDLE_DEFAULT }
+  : null);
 
 function view(p) {
   return {
@@ -55,7 +60,8 @@ function view(p) {
     canDelegate: TASKS,
     tasksEnabled: TASKS,
     hasTaskKey: !!p.taskKey,
-    tasksPaused: !!p.paused
+    tasksPaused: !!p.paused,
+    idle: { minutes: p.idleMinutes ?? null, defaultMinutes: IDLE_DEFAULT, minMinutes: 5, maxMinutes: IDLE_MAX }
   };
 }
 
@@ -225,6 +231,16 @@ export async function handle(ctx) {
     return true;
   }
   if (p === '/profile/task-key' && method === 'PUT') { profile.taskKey = body.key || null; json(res, 200, view(profile)); return true; }
+  if (p === '/profile/idle' && method === 'PUT') {
+    const m = body.minutes;
+    if (m != null && !(Number.isInteger(m) && m >= 5 && m <= IDLE_MAX)) {
+      json(res, 400, { error: `Choose between 5 and ${IDLE_MAX} minutes.`, code: 'IDLE_OUT_OF_RANGE' });
+      return true;
+    }
+    profile.idleMinutes = m ?? null;
+    json(res, 200, view(profile));
+    return true;
+  }
   if (p === '/profile/tasks-paused' && method === 'PUT') { profile.paused = !!body.paused; json(res, 200, view(profile)); return true; }
   if (p === '/profile' && method === 'DELETE') {
     profiles.delete(profile.id);

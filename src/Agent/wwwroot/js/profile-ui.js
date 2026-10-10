@@ -42,7 +42,8 @@ let offerDismissed = false;
 
 /**
  * hooks: {
- *   getSession(), currentSettings() → { openRouterKey, model, toolsOff },
+ *   getSession(), currentSettings() → { openRouterKey, model, toolsOff, allowChanges },
+ *   onIdleChanged(minutes), getAllowChanges(), setAllowChanges(value),
  *   onSignedIn({ session, skipped, settings }), onSession(session), onEnded(message),
  *   notice(text, kind), setLoginError(text), closeOtherPopovers()
  * }
@@ -262,6 +263,45 @@ function renderPopover() {
     return el.popover.replaceChildren(...parts);
   }
 
+  // Settings
+  add(section('Settings'));
+  const idleRow = add(document.createElement('label'));
+  idleRow.className = 'profile-row';
+  const idleText = document.createElement('span');
+  idleText.textContent = 'Sign out after idle for';
+  const idle = document.createElement('select');
+  idle.className = 'profile-input';
+  for (const [value, text] of idleChoices(view.idle)) {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = text;
+    idle.appendChild(o);
+  }
+  idle.value = view.idle.minutes == null ? '' : String(view.idle.minutes);
+  idle.addEventListener('change', () => busy(idle, async () => {
+    try {
+      view = await api.setProfileIdle(idle.value === '' ? null : Number(idle.value));
+    } catch (err) {
+      idle.value = view.idle.minutes == null ? '' : String(view.idle.minutes);
+      throw err;
+    }
+    hooks.onIdleChanged(view.idle.minutes ?? view.idle.defaultMinutes);
+    renderPopover();
+  }));
+  idleRow.append(idleText, idle);
+  add(para('Applies to every browser signed in to this profile. A new tab or a restarted browser also opens it without the passkey until then.'));
+
+  const allowLabel = add(document.createElement('label'));
+  allowLabel.className = 'tools-option';
+  const allow = document.createElement('input');
+  allow.type = 'checkbox';
+  allow.checked = hooks.getAllowChanges();
+  allow.disabled = !profile.hasKeys();
+  allow.addEventListener('change', () => hooks.setAllowChanges(allow.checked));
+  const allowText = document.createElement('span');
+  allowText.textContent = 'Accounts I add start with changes allowed';
+  allowLabel.append(allow, allowText);
+
   // Passkeys
   add(section('Passkeys'));
   for (const p of view.passkeys) {
@@ -353,11 +393,20 @@ function renderPopover() {
       await api.deleteProfile();
       profile.lock();
       profile.forgetHint();
+      await profile.forgetWarm();
       hooks.onEnded('Your profile was deleted from this server, and its accounts were signed out.');
     });
   });
 
   el.popover.replaceChildren(...parts);
+}
+
+/** The idle timeouts offered: the server default, then the usual steps within the server's range. */
+function idleChoices({ minutes, defaultMinutes, minMinutes, maxMinutes }) {
+  const label = (m) => (m < 60 ? `${m} min` : m % 60 ? `${(m / 60).toFixed(1)} h` : `${m / 60} h`);
+  const steps = new Set([5, 15, 30, 60, 120, 240, 480, 720, 1440].filter((m) => m >= minMinutes && m <= maxMinutes));
+  if (minutes != null) steps.add(minutes);
+  return [['', `Default (${label(defaultMinutes)})`], ...[...steps].sort((a, b) => a - b).map((m) => [String(m), label(m)])];
 }
 
 async function busy(control, fn) {

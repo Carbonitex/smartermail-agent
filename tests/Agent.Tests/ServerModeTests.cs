@@ -59,6 +59,14 @@ public sealed class ServerOptionsTests
         Assert.Throws<InvalidOperationException>(() => Parse((key, value)));
 
     [Fact]
+    public void Profile_idle_maximum()
+    {
+        Assert.Equal(480, Parse().ProfileMaxIdleMinutes);
+        Assert.Equal(120, Parse(("PROFILE_MAX_IDLE_MINUTES", "120")).ProfileMaxIdleMinutes);
+        Assert.Equal(ServerOptions.ProfileMinIdleMinutes, Parse(("PROFILE_MAX_IDLE_MINUTES", "1")).ProfileMaxIdleMinutes);
+    }
+
+    [Fact]
     public void Profile_hosts_allowlist()
     {
         var options = Parse(("PROFILE_MAIL_HOSTS", "Mail.Example.com, other.example.org"));
@@ -306,6 +314,64 @@ public sealed class ServerModeHttpTests : IDisposable
             Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
         Assert.NotEmpty(_stub.Logouts);
         Assert.Null(store.Get(cookie));
+    }
+
+    [Fact]
+    public async Task Profile_chooses_its_session_idle_timeout()
+    {
+        var app = App(("DATA_DIR", TestEnvironment.NewDataDir()), ("PROFILE_MAX_IDLE_MINUTES", "120"));
+        using var client = Client(app);
+        var store = app.Services.GetRequiredService<SessionStore>();
+        var first = store.Create(ResumeFixtures.NewAccount(_stub.Auth()));
+
+        var begin = await Json(await client.SendAsync(Req(HttpMethod.Post, "/api/profile/register/options", first.Id, new { })));
+        var credential = new SoftAuthenticator().Create(begin.GetProperty("options"), "http://localhost");
+        using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var created = await client.SendAsync(Req(HttpMethod.Post, "/api/profile", first.Id, new
+        {
+            ceremonyId = begin.GetProperty("ceremonyId").GetString(),
+            credential,
+            wrappedKey = Base64Url.Encode(RandomNumberGenerator.GetBytes(60)),
+            accountsKey = Base64Url.Encode(RandomNumberGenerator.GetBytes(32)),
+            publicKey = Base64Url.Encode(ecdh.ExportSubjectPublicKeyInfo()),
+            encryptedPrivateKey = Base64Url.Encode(RandomNumberGenerator.GetBytes(200)),
+        }));
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var cookie = CookieOf(created)!;
+        var session = store.Get(cookie)!;
+        var defaultMinutes = (int)SessionStore.IdleTimeout.TotalMinutes;
+
+        var idle = (await Json(await client.SendAsync(Req(HttpMethod.Get, "/api/profile", cookie)))).GetProperty("idle");
+        Assert.Equal(JsonValueKind.Null, idle.GetProperty("minutes").ValueKind);
+        Assert.Equal(defaultMinutes, idle.GetProperty("defaultMinutes").GetInt32());
+        Assert.Equal(120, idle.GetProperty("maxMinutes").GetInt32());
+
+        foreach (var outOfRange in new[] { 4, 121 })
+        {
+            using var refused = await client.SendAsync(Req(HttpMethod.Put, "/api/profile/idle", cookie, new { minutes = outOfRange }));
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Equal("IDLE_OUT_OF_RANGE", (await Json(refused)).GetProperty("code").GetString());
+        }
+
+        using (var set = await client.SendAsync(Req(HttpMethod.Put, "/api/profile/idle", cookie, new { minutes = 90 })))
+        {
+            Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+            Assert.Equal(90, (await Json(set)).GetProperty("idle").GetProperty("minutes").GetInt32());
+        }
+
+        // The open session follows it at once, and the browser is told (it keeps the keys as long).
+        Assert.Equal(TimeSpan.FromMinutes(90), session.IdleTimeout(SessionStore.IdleTimeout));
+        var state = await Json(await client.SendAsync(Req(HttpMethod.Get, "/api/auth/session", cookie)));
+        Assert.Equal(90, state.GetProperty("profile").GetProperty("idleMinutes").GetInt32());
+
+        // A later runtime (every session closed, then a new sign-in) reads it back from the database.
+        var profileId = session.Profile!.ProfileId;
+        var registry = app.Services.GetRequiredService<ProfileRegistry>();
+        Assert.Equal(TimeSpan.FromMinutes(90), registry.AcquireSession(profileId).IdleTimeout);
+
+        using (var reset = await client.SendAsync(Req(HttpMethod.Put, "/api/profile/idle", cookie, new { minutes = (int?)null })))
+            Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+        Assert.Equal(SessionStore.IdleTimeout, session.IdleTimeout(SessionStore.IdleTimeout));
     }
 
     [Fact]
