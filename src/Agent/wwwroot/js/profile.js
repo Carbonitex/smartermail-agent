@@ -354,6 +354,18 @@ export async function openTranscript(profileView, run) {
   return JSON.parse(new TextDecoder().decode(plain));
 }
 
+/**
+ * Opens any value the server sealed to this profile's public key with the given
+ * context (approval proposals: `task-proposal|<profile>|<id>`, results:
+ * `task-proposal-result|<profile>|<id>`), as parsed JSON.
+ */
+export async function openSealedJson(profileView, sealed, context) {
+  if (!keys) throw new Error('Unlock the profile with your passkey to read this.');
+  if (!sealed) return null;
+  if (!inboxPrivateKey) inboxPrivateKey = await vault.openInboxPrivateKey(keys.inboxKey, profileView.encryptedPrivateKey);
+  return JSON.parse(new TextDecoder().decode(await vault.openSealedToMe(inboxPrivateKey, sealed, context)));
+}
+
 /* --------------------------------------------------------------- helpers */
 
 function accountLabel(session) {

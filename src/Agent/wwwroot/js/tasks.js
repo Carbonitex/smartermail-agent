@@ -13,6 +13,7 @@ import * as profile from './profile.js';
 import { loadView, currentView } from './profile-ui.js';
 import { renderMarkdown, prettyJson } from './markdown.js';
 import { categoryOf } from './llm.js';
+import { renderApprovals, modeSelect, approvalFields } from './approvals.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -48,7 +49,8 @@ export async function refreshBadge() {
   if (el.button.hidden) return;
   try {
     listing = await api.tasks();
-    el.button.textContent = listing.unread ? `Tasks ● ${listing.unread}` : 'Tasks';
+    el.button.textContent = (listing.unread ? `Tasks ● ${listing.unread}` : 'Tasks') +
+      (listing.pending ? ` · ${listing.pending} to approve` : '');
   } catch { /* keep the old text */ }
 }
 
@@ -77,6 +79,12 @@ async function renderList() {
       ].filter(Boolean).join(', and ') + ', both in the Profile menu.', 'warn'));
   }
   if (view?.tasksPaused) parts.push(para('All tasks are paused (Profile menu).', 'warn'));
+  if (tasks.pending) {
+    const waiting = div('task-card approval-banner');
+    waiting.append(para(`${tasks.pending} change${tasks.pending === 1 ? ' is' : 's are'} waiting for your approval.`),
+      button('Review', () => openApprovals(), true));
+    parts.push(waiting);
+  }
 
   if (!tasks.tasks.length) parts.push(para('No tasks yet. A task is a prompt the server runs on a schedule with the accounts you choose, for example "Every weekday at 7:00, summarise unread mail and email me the summary".'));
 
@@ -85,8 +93,22 @@ async function renderList() {
   const actions = div('modal-actions');
   actions.append(button('New task', () => renderEditor(null), true));
   if (tasks.tasks.length) actions.append(button('All results', () => renderRuns(null)));
+  if (tasks.tasks.length) actions.append(button(tasks.pending ? `To approve (${tasks.pending})` : 'To approve', () => openApprovals()));
   parts.push(actions);
   el.body.replaceChildren(...parts);
+}
+
+/** The approval queue (approvals.js), inside this dialog. */
+function openApprovals() {
+  clearInterval(poll);
+  poll = null;
+  return renderApprovals(el.body, {
+    notice: (text, kind) => hooks.notice(text, kind),
+    unlock: () => hooks.unlock(),
+    back: () => renderList(),
+    openRun: (runId) => renderRun({ id: runId }, null, () => openApprovals()),
+    onChange: () => refreshBadge()
+  });
 }
 
 function taskCard(t, view) {
@@ -104,7 +126,12 @@ function taskCard(t, view) {
       (t.nextRunAt && t.enabled ? ` · next ${new Date(t.nextRunAt).toLocaleString()}` : '') +
       (t.lastRunAt ? ` · last ${new Date(t.lastRunAt).toLocaleString()}` : '')));
     const names = d.accountIds.map((id) => view?.accounts.find((a) => a.id === id)?.login || 'removed account');
-    card.append(para(`As ${names.join(', ')} · ${d.allowedWrites.length ? `may change: ${d.allowedWrites.join(', ')} (at most ${d.maxWrites})` : 'read-only'}` +
+    const asks = new Set(d.approvals?.writes || []);
+    const direct = d.allowedWrites.filter((n) => !asks.has(n));
+    card.append(para(`As ${names.join(', ')} · ${d.allowedWrites.length
+      ? [direct.length ? `may change: ${direct.join(', ')} (at most ${d.maxWrites})` : null,
+        asks.size ? `asks you first: ${[...asks].join(', ')}` : null].filter(Boolean).join(' · ')
+      : 'read-only'}` +
       (d.emailAccountId ? ' · emails you the result' : '')));
   }
 
@@ -180,11 +207,15 @@ function renderEditor(task) {
   // Changes: write tools the session knows, for the chosen accounts' scopes
   const writes = div('task-checks task-writes');
   const writeBoxes = new Map();
+  // Per allowed write: 'auto' (the run makes it) or 'approve' (the run proposes it; see approvals.js).
+  // A saved task keeps what it had (older tasks: all 'auto'); anything new gets the safe default.
+  const modes = new Map((d?.allowedWrites || []).map((n) => [n, (d.approvals?.writes || []).includes(n) ? 'approve' : 'auto']));
   const renderWrites = () => {
     const chosen = accounts.filter((a, i) => accountBoxes[i].input.checked);
     const scopes = new Set(chosen.flatMap((a) => a.readOnly ? [] : a.role === 'SysAdmin' ? ['SysAdmin'] : a.role === 'DomainAdmin' ? ['Mailbox', 'DomainAdmin'] : ['Mailbox']));
     const tools = hooks.getToolList().filter((t) => t.write && scopes.has(t.scope));
     const keep = new Set([...writeBoxes].filter(([, c]) => c.input.checked).map(([n]) => n));
+    for (const [n, c] of writeBoxes) modes.set(n, c.mode.value);
     if (!writeBoxes.size && d) d.allowedWrites.forEach((n) => keep.add(n));
     writeBoxes.clear();
     writes.replaceChildren();
@@ -210,8 +241,13 @@ function renderEditor(task) {
         const c = checkbox(t.destructive ? `${t.name} ⚠ destructive` : t.name, keep.has(t.name), t.name);
         if (t.destructive) c.label.classList.add('destructive');
         c.label.title = t.description || '';
+        c.mode = modeSelect(t, modes.get(t.name));
+        c.mode.hidden = !c.input.checked;
+        c.input.addEventListener('change', () => { c.mode.hidden = !c.input.checked; });
         writeBoxes.set(t.name, c);
-        fs.append(c.label);
+        const row = div('approval-write-row');
+        row.append(c.label, c.mode);
+        fs.append(row);
       }
       writes.append(fs);
     }
@@ -222,6 +258,7 @@ function renderEditor(task) {
   const maxWrites = input('number', String(d?.maxWrites ?? 5));
   maxWrites.min = '1';
   maxWrites.max = '50';
+  const approval = approvalFields(d?.approvals, profile.taskLimits().approvals);
   const model = input('text', d?.model || hooks.currentModel());
   const email = select([['', 'No, only keep it here'],
     ...accounts.filter((a) => !a.readOnly && a.role !== 'SysAdmin').map((a) => [a.id, `Yes, from and to ${a.login}`])], d?.emailAccountId || '');
@@ -238,7 +275,11 @@ function renderEditor(task) {
     field('Changes it may make', writes,
       'Nothing is allowed unless ticked here. Mail it reads can contain instructions meant for it; it is told to ignore them, ' +
       'and the server refuses any change not on this list. Try a test run first.'),
-    field('At most this many changes per run', maxWrites),
+    field('At most this many changes per run', maxWrites, 'Changes that ask you first do not count here.'),
+    field('At most this many changes to ask you about per run', approval.maxProposals,
+      'A change that asks you first is only proposed: you see the exact call under Tasks → To approve and decide.'),
+    field('Proposals wait this many days, then expire', approval.ttlDays),
+    approval.passkey,
     field('Model', model),
     field('Email the result to you?', email),
     enabled.label,
@@ -260,6 +301,10 @@ function renderEditor(task) {
       timeZone: zone.value.trim(),
       accountIds: accounts.filter((a, i) => accountBoxes[i].input.checked).map((a) => a.id),
       allowedWrites: [...writeBoxes].filter(([, c]) => c.input.checked).map(([n]) => n),
+      approvals: {
+        writes: [...writeBoxes].filter(([, c]) => c.input.checked && c.mode.value === 'approve').map(([n]) => n),
+        ...approval.read()
+      },
       maxWrites: Number(maxWrites.value) || 1,
       model: model.value.trim(),
       emailAccountId: email.value || null,
@@ -335,7 +380,7 @@ async function renderRuns(task, { watch = false } = {}) {
   if (watch) poll = setInterval(draw, 3000);
 }
 
-async function renderRun(summary, task) {
+async function renderRun(summary, task, back = null) {
   clearInterval(poll);
   poll = null;
   const parts = [heading('Result')];
@@ -346,7 +391,7 @@ async function renderRun(summary, task) {
       parts.push(para('This page does not hold your profile keys (it was reloaded). Unlock to read the result.', 'warn'));
       parts.push(button('Unlock with passkey', async (b) => {
         b.disabled = true;
-        try { await hooks.unlock(); await renderRun(summary, task); } catch (err) { hooks.notice(err.message, 'error'); b.disabled = false; }
+        try { await hooks.unlock(); await renderRun(summary, task, back); } catch (err) { hooks.notice(err.message, 'error'); b.disabled = false; }
       }, true));
     } else {
       transcript = await profile.openTranscript(currentView() || await loadView(), run);
@@ -371,10 +416,11 @@ async function renderRun(summary, task) {
       sum.textContent = `${steps.length} tool call${steps.length === 1 ? '' : 's'}`;
       details.append(sum);
       for (const s of steps) {
-        const item = div('run-step' + (s.isError ? ' error' : '') + (s.simulated ? ' simulated' : ''));
+        const item = div('run-step' + (s.isError ? ' error' : '') + (s.simulated ? ' simulated' : '') + (s.proposalId ? ' proposed' : ''));
         const head = document.createElement('div');
         head.className = 'run-step-head';
-        head.textContent = `${s.tool}${s.account ? ' as ' + s.account : ''}${s.simulated ? ' — simulated' : ''}${s.isError ? ' — failed or refused' : ''}`;
+        head.textContent = `${s.tool}${s.account ? ' as ' + s.account : ''}${s.simulated ? ' — simulated' : ''}` +
+          `${s.proposalId ? ' — queued for your approval' : ''}${s.isError ? ' — failed or refused' : ''}`;
         const pre = document.createElement('pre');
         pre.className = 'code';
         pre.textContent = `${prettyJson(s.arguments || '{}')}\n\n${prettyJson(s.content || '')}`;
@@ -387,7 +433,7 @@ async function renderRun(summary, task) {
   }
 
   const actions = div('modal-actions');
-  actions.append(button('Back', () => renderRuns(task)));
+  actions.append(button('Back', () => (back ? back() : renderRuns(task))));
   parts.push(actions);
   el.body.replaceChildren(...parts);
   refreshBadge();

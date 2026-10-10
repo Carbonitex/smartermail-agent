@@ -7,6 +7,7 @@ using SmarterMailAgent.Mcp;
 using SmarterMailAgent.Profiles;
 using SmarterMailAgent.Server;
 using SmarterMailAgent.Storage;
+using SmarterMailAgent.Tasks.Approvals;
 
 namespace SmarterMailAgent.Tasks;
 
@@ -82,21 +83,25 @@ public sealed class TaskRunner(
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stopping);
                 timeout.CancelAfter(options.TaskTimeout);
 
-                var gate = new ToolGate(definition!.AllowedWrites.ToHashSet(StringComparer.Ordinal), definition.MaxWrites, dryRun);
+                var approvals = services.GetRequiredService<ApprovalQueue>();
+                ArgumentNullException.ThrowIfNull(definition);
+                var gate = approvals.GateFor(definition, profile!, task.Id, runId, dryRun);
                 var context = new TaskToolContext(accounts, runtime, gate);
                 var zone = TaskDefinition.TryParseSchedule(definition.Cron, definition.TimeZone, out _, out var z) ? z : TimeZoneInfo.Utc;
                 var prompt = TaskPrompt.Build(definition.Name, accounts, definition.AllowedWrites, definition.MaxWrites, dryRun,
                     DateTimeOffset.UtcNow, zone, new TaskPrompt.History(
                         lastOk is null ? null : DateTimeOffset.FromUnixTimeMilliseconds(lastOk.StartedAt),
                         latest is not null && latest.Status != "ok" && (lastOk is null || latest.StartedAt > lastOk.StartedAt)
-                            ? DateTimeOffset.FromUnixTimeMilliseconds(latest.StartedAt) : null));
+                            ? DateTimeOffset.FromUnixTimeMilliseconds(latest.StartedAt) : null), gate.ApprovalWrites);
 
-                result = await loop.RunAsync(key, definition.Model, prompt, definition.Prompt, ToolsFor(accounts, gate.AllowedWrites),
+                result = await loop.RunAsync(key, definition.Model, prompt, definition.Prompt,
+                    ApprovalNote.Inject(ToolsFor(accounts, gate.AllowedWrites), gate.ApprovalWrites),
                     async (name, arguments, ct) =>
                     {
                         var outcome = await dispatcher.DispatchAsync(context, name, arguments, services, ct);
                         return new AgentLoop.ToolResult(ToolInvoker.Flatten(outcome.Result),
-                            outcome.Status != ToolDispatcher.Status.Ok || (outcome.Result.IsError ?? false), outcome.Account, outcome.Simulated);
+                            outcome.Status != ToolDispatcher.Status.Ok || (outcome.Result.IsError ?? false), outcome.Account, outcome.Simulated,
+                            outcome.ProposalId);
                     },
                     options.TaskMaxToolRounds, timeout.Token, sessionId: $"sma-task-run-{runId}");
 
@@ -107,10 +112,11 @@ public sealed class TaskRunner(
                     _ => ("failed", result.ErrorCode ?? "ERROR"),
                 };
 
+                var approvalFooter = approvals.Finish(runId, gate, zone);
                 if (status == "ok" && !dryRun && definition.EmailAccountId is { } emailId &&
                     accounts.FirstOrDefault(a => a.Id == emailId) is { } mailbox)
                 {
-                    emailed = await EmailAsync(mailbox, definition.Name, result.Final, stopping);
+                    emailed = await EmailAsync(mailbox, definition.Name, ApprovalPrompt.WithFooter(result.Final, approvalFooter), stopping);
                 }
 
                 tasks.FinishRun(runId, status, status == "ok" ? (code == "ok" ? null : code) : code, result.ToolCalls, gate.Writes,

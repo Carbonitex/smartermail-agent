@@ -14,6 +14,7 @@ namespace SmarterMailAgent.Tasks;
 /// <param name="AccountIds">Profile account ids; each must be delegated (sealed with the server key).</param>
 /// <param name="AllowedWrites">The only write tools the run may call, by name. Empty = a read-only task.</param>
 /// <param name="EmailAccountId">Mail the result to this account's own address (one of <paramref name="AccountIds"/>, read-write, with a mailbox).</param>
+/// <param name="Approvals">Which allowed writes are proposed for approval instead of run (null on older tasks: none).</param>
 public sealed record TaskDefinition(
     int Version,
     string Name,
@@ -24,7 +25,8 @@ public sealed record TaskDefinition(
     IReadOnlyList<string> AllowedWrites,
     int MaxWrites,
     string Model,
-    string? EmailAccountId)
+    string? EmailAccountId,
+    global::SmarterMailAgent.Tasks.Approvals.TaskApprovals? Approvals = null)
 {
     public const int MaxName = 80;
     public const int MaxPrompt = 4000;

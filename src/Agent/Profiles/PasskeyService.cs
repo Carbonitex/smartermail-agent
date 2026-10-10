@@ -127,7 +127,8 @@ public sealed class PasskeyService(ServerOptions options, ProfileStore store, IL
     /// <summary>Verifies a sign-in and advances the stored counter. Null when anything is off.</summary>
     public async Task<PasskeyRow?> CompleteLoginAsync(string? ceremonyId, JsonElement credential, CancellationToken ct)
     {
-        if (Take(ceremonyId) is not { Options: AssertionOptions assertion } ceremony)
+        // A step-up ceremony (bound, see BeginStepUp) never signs anyone in.
+        if (Take(ceremonyId) is not { Options: AssertionOptions assertion, Binding: null } ceremony)
             return null;
 
         try
@@ -157,6 +158,77 @@ public sealed class PasskeyService(ServerOptions options, ProfileStore store, IL
         catch (Exception ex) when (ex is Fido2VerificationException or JsonException or ArgumentException or InvalidOperationException or FormatException)
         {
             logger.LogInformation("Passkey sign-in refused: {Kind}.", ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Options for a step-up: <c>navigator.credentials.get</c> limited to this profile's passkeys, user
+    /// verification required. <paramref name="binding"/> is held server-side (browsers show no
+    /// transaction text): the ceremony only completes with the same binding, e.g. this session, this
+    /// proposal and these exact arguments.
+    /// </summary>
+    public (string CeremonyId, JsonElement Options) BeginStepUp(
+        HttpRequest request, string profileId, IEnumerable<string> credentialIds, string binding)
+    {
+        var origin = OriginFor(request);
+        var assertion = Fido(origin).GetAssertionOptions(new GetAssertionOptionsParams
+        {
+            AllowedCredentials = credentialIds
+                .Select(id => Base64Url.Decode(id))
+                .Where(id => id is not null)
+                .Select(id => new PublicKeyCredentialDescriptor(id!))
+                .ToList(),
+            UserVerification = UserVerificationRequirement.Required,
+        });
+
+        var id = Remember(new Ceremony(assertion, origin, binding, DateTimeOffset.UtcNow + CeremonyLifetime, profileId));
+        return (id, JsonSerializer.Deserialize<JsonElement>(assertion.ToJson()));
+    }
+
+    /// <summary>
+    /// Verifies a step-up assertion: same binding, a passkey of <paramref name="profileId"/>, user
+    /// verified, signature and counter valid. Advances the counter. Null (logged by failure class
+    /// only) when anything is off.
+    /// </summary>
+    public async Task<PasskeyRow?> CompleteStepUpAsync(
+        string? ceremonyId, JsonElement credential, string binding, string profileId, CancellationToken ct)
+    {
+        if (Take(ceremonyId) is not { Options: AssertionOptions assertion, Binding: { } bound } ceremony ||
+            !string.Equals(bound, binding, StringComparison.Ordinal) ||
+            !string.Equals(ceremony.ProfileId, profileId, StringComparison.Ordinal))
+        {
+            logger.LogInformation("Passkey step-up refused: no matching ceremony.");
+            return null;
+        }
+
+        try
+        {
+            var response = JsonSerializer.Deserialize<AuthenticatorAssertionRawResponse>(Scrub(credential).GetRawText())
+                           ?? throw new Fido2VerificationException("Empty credential.");
+            var passkey = store.GetPasskey(Base64Url.Encode(response.RawId));
+            if (passkey is null || passkey.ProfileId != profileId)
+            {
+                logger.LogInformation("Passkey step-up refused: not a passkey of this profile.");
+                return null;
+            }
+
+            var result = await Fido(ceremony.Origin).MakeAssertionAsync(new MakeAssertionParams
+            {
+                AssertionResponse = response,
+                OriginalOptions = assertion,
+                StoredPublicKey = passkey.PublicKey,
+                StoredSignatureCounter = passkey.SignCount,
+                IsUserHandleOwnerOfCredentialIdCallback = (args, _) => Task.FromResult(
+                    args.UserHandle is not { Length: > 0 } handle || Base64Url.Encode(handle) == passkey.ProfileId),
+            }, ct);
+
+            store.RecordPasskeyUse(passkey.CredentialId, result.SignCount);
+            return passkey;
+        }
+        catch (Exception ex) when (ex is Fido2VerificationException or JsonException or ArgumentException or InvalidOperationException or FormatException)
+        {
+            logger.LogInformation("Passkey step-up refused: {Kind}.", ex.GetType().Name);
             return null;
         }
     }

@@ -381,6 +381,52 @@ export function markRunRead(runId) {
   return request('/tasks/runs/' + encodeURIComponent(runId) + '/read', { method: 'POST' });
 }
 
+/* ---- server mode: the approval queue (cookie only, the session's own profile) ---- */
+
+/**
+ * GET /api/tasks/proposals → [{ id, taskId, runId, status, needsPasskey, createdAt, expiresAt,
+ * decidedAt, executedAt, errorCode, errorMessage, read, display, result }], newest first.
+ * `display` / `result` are sealed to the profile's public key (task-proposal|… / task-proposal-result|…).
+ * status: 'pending' (default) | 'decided' | 'all'.
+ */
+export function proposals(status = 'pending', { taskId, limit } = {}) {
+  const q = new URLSearchParams({ status });
+  if (taskId) q.set('taskId', taskId);
+  if (limit) q.set('limit', String(limit));
+  return request('/tasks/proposals?' + q.toString());
+}
+
+export function proposal(id) {
+  return request('/tasks/proposals/' + encodeURIComponent(id));
+}
+
+/** POST …/approve/options { argsHash } → { passkey: false } or { passkey: true, ceremonyId, options }. */
+export function approveOptions(id, argsHash) {
+  return request('/tasks/proposals/' + encodeURIComponent(id) + '/approve/options', { method: 'POST', body: { argsHash } });
+}
+
+/**
+ * POST …/approve { argsHash, ceremonyId?, credential? } → { status: 'executed'|'failed'|'unknown', errorCode, errorMessage, result }.
+ * Throws ApiError: 401 PASSKEY_REQUIRED / PASSKEY_INVALID, 409 PROPOSAL_MISMATCH / PROPOSAL_NOT_PENDING /
+ * PROFILE_LOCKED, 410 PROPOSAL_EXPIRED, 503 ACCOUNT_UNAVAILABLE (still pending).
+ */
+export function approveProposal(id, body) {
+  return request('/tasks/proposals/' + encodeURIComponent(id) + '/approve', { method: 'POST', body });
+}
+
+export function denyProposal(id) {
+  return request('/tasks/proposals/' + encodeURIComponent(id) + '/deny', { method: 'POST' });
+}
+
+/** POST /api/tasks/proposals/deny { runId } → { denied }: every pending proposal of that run. */
+export function denyRunProposals(runId) {
+  return request('/tasks/proposals/deny', { method: 'POST', body: { runId } });
+}
+
+export function markProposalRead(id) {
+  return request('/tasks/proposals/' + encodeURIComponent(id) + '/read', { method: 'POST' });
+}
+
 /** Absolute URL of the MCP endpoint, for an MCP client's config. */
 export const mcpUrl = () => location.origin + appRoot() + 'mcp';
 

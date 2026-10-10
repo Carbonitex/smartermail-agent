@@ -18,7 +18,11 @@ public sealed class ConfigController(ServerOptions options, ResumeSealer sealer)
 
     public sealed record ProfilesConfig(bool Enabled);
 
-    public sealed record TasksConfig(bool Enabled, int MinIntervalMinutes, int MaxPerProfile, int MaxToolRounds);
+    public sealed record TasksConfig(bool Enabled, int MinIntervalMinutes, int MaxPerProfile, int MaxToolRounds,
+        ApprovalsConfig? Approvals = null);
+
+    /// <summary>The approval queue's limits: per-task TTL (default and maximum), pending per profile, proposals per run.</summary>
+    public sealed record ApprovalsConfig(int TtlHours, int MaxTtlHours, int MaxPending, int MaxProposalsPerRun, int DefaultProposalsPerRun);
 
     /// <param name="Mode"><c>server</c> or <c>browser</c> (BROWSER_ONLY_MODE).</param>
     public sealed record ConfigResponse(string Mode, ResumeConfig Resume, ProfilesConfig Profiles, TasksConfig Tasks);
@@ -29,5 +33,7 @@ public sealed class ConfigController(ServerOptions options, ResumeSealer sealer)
         new ResumeConfig(sealer.Enabled, sealer.Enabled ? (int)sealer.MaxAge.TotalDays : 0),
         new ProfilesConfig(options.ServerMode),
         new TasksConfig(options.TasksEnabled, (int)options.TaskMinInterval.TotalMinutes, options.TasksPerProfile,
-            options.TaskMaxToolRounds)));
+            options.TaskMaxToolRounds,
+            new ApprovalsConfig(Tasks.Approvals.TaskApprovals.DefaultTtlHours, Tasks.Approvals.TaskApprovals.MaxTtlHours,
+                options.ApprovalMaxPending, options.TaskMaxProposals, Tasks.Approvals.TaskApprovals.DefaultMaxProposals))));
 }

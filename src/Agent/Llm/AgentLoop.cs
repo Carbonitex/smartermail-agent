@@ -14,13 +14,15 @@ public sealed class AgentLoop(OpenRouterClient llm)
     public const int MaxToolResultChars = 60_000;
 
     /// <summary>What a tool call came back with.</summary>
-    public sealed record ToolResult(string Content, bool IsError, string? Account, bool Simulated);
+    /// <param name="ProposalId">An approval write: queued as this proposal, not run.</param>
+    public sealed record ToolResult(string Content, bool IsError, string? Account, bool Simulated, string? ProposalId = null);
 
     /// <summary>One entry of a run's transcript.</summary>
     /// <param name="Kind"><c>assistant</c>, <c>tool</c> or <c>notice</c>.</param>
+    /// <param name="ProposalId">The call was queued for approval as this proposal.</param>
     public sealed record Step(
         string Kind, string? Content = null, string? Tool = null, string? Arguments = null, string? Account = null,
-        bool IsError = false, bool Simulated = false);
+        bool IsError = false, bool Simulated = false, string? ProposalId = null);
 
     /// <param name="Stop"><c>completed</c>, <c>max_rounds</c>, <c>length</c>, <c>content_filter</c>, <c>cancelled</c> or <c>error</c>.</param>
     /// <param name="CachedTokens">Of <paramref name="PromptTokens"/>, how many were read from the provider's prompt cache.</param>
@@ -122,7 +124,7 @@ public sealed class AgentLoop(OpenRouterClient llm)
                     var content = Clamp(result.Content);
                     messages.Add(ToolMessage(call.Id, content));
                     steps.Add(new Step("tool", Clamp(result.Content, 4000), call.Name, Clamp(call.Arguments, 4000), result.Account,
-                        result.IsError, result.Simulated));
+                        result.IsError, result.Simulated, result.ProposalId));
                 }
             }
         }

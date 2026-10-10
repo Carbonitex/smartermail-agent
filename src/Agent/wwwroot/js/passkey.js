@@ -133,6 +133,22 @@ export async function getPasskey(serverOptions) {
 }
 
 /**
+ * A step-up: confirms one action with a passkey of this profile (approving a
+ * proposed change). No PRF extension: nothing secret is derived, the server
+ * only verifies the signature, user verification and that the ceremony is
+ * bound to this session, proposal and argument hash. Returns the assertion
+ * JSON for the server. A password manager's dismissed prompt falls through to
+ * the browser's own (webauthn.js).
+ */
+export async function assertPasskey(serverOptions) {
+  const { extensions, ...publicKey } = requestOptions(serverOptions);
+  void extensions;
+  const { credential } = await getCredential(publicKey);
+  if (!credential) throw new Error('No passkey was chosen.');
+  return assertionJson(credential);
+}
+
+/**
  * PRF output of one known credential, with a local challenge (nothing is sent to the server).
  * `native`: the credential was made past a password manager, so ask the browser directly again.
  */
