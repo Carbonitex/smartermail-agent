@@ -197,11 +197,13 @@ Profiles/
   PasskeyService.cs           WebAuthn ceremonies (fido2-net-lib), single-use, 2 minutes
   ProfileMaintenance.cs       ceremony sweep; daily idle-profile pruning and delegated-account keep-alive
 Llm/
-  OpenRouterClient.cs         non-streaming chat completions for scheduled runs
+  OpenRouterClient.cs         non-streaming chat completions for scheduled runs; `BuildBody` lays out
+                              prompt caching (below), `session_id` per run, usage incl. cached tokens + cost
   AgentLoop.cs                the tool loop (port of llm.js runTurn)
 Tasks/
   TaskDefinition.cs           sealed definition, cron (Cronos) + time zone, validation
-  TaskPrompt.cs               the unattended system prompt
+  TaskPrompt.cs               the unattended system prompt, incl. `History`: when the previous successful
+                              run started (task time zone) and whether a later attempt failed
   TaskRunner.cs               one run: accounts, gate, loop, sealed transcript, optional email
   TaskRunScheduler.cs         30 s tick, claim, concurrency, "Run now"
 Auth/
@@ -246,6 +248,8 @@ Web/
   ProxyTrust.cs               TRUSTED_PROXIES / TRUST_CF_CONNECTING_IP: forwarded headers + rate-limit key
   ResumeHeaders.cs            X-Resume-Version on cookie responses; /api responses no-store
 wwwroot/                      the browser UI (owned by the frontend; wwwroot/dev/ is not shipped)
+  js/llm.js                   the chat's tool loop; `buildRequestBody` (prompt caching, below),
+                              `elideOldToolResults` (below), usage per round and per turn
   js/vault.js                 profile cryptography (pure WebCrypto; node-tested, incl. a C#-sealed vector)
   js/passkey.js               WebAuthn glue: options in, credentials out WITHOUT clientExtensionResults
   js/webauthn.js              navigator.credentials past a password manager: a refused extension prompt
@@ -802,7 +806,34 @@ same login reuses the row id (`RowForLogin`), which tasks refer to.
   delivery is `send_email` from the delivery account to its own address, issued by the server.
 - **Failures**: codes in `TaskRunner.Explain`; hard ones (`TaskStore.HardFailures`: sign-in rejected,
   no or rejected key, account removed / no longer delegated / unreadable) pause the task at once,
-  others after three in a row. Logs carry the task id, outcome and counts, never prompts or results.
+  others after three in a row. Logs carry the task id, outcome and counts (incl. prompt and cached
+  tokens), never prompts or results.
+- **History**: `TaskStore.PreviousRuns` gives `TaskPrompt` the start of the last non-test `ok` run and
+  the latest non-test run if it failed after that; test runs and running runs never count, "Run now"
+  does. The runs list shows prompt / completion tokens.
+
+### Prompt caching and context size
+
+Same rules in the browser (`llm.js` `buildRequestBody`) and for scheduled runs
+(`OpenRouterClient.BuildBody`), from OpenRouter's prompt-caching docs:
+
+- **Anthropic** (`anthropic/*`, `~anthropic/*`): the system message is a one-part text array with
+  `cache_control: { type: "ephemeral" }` (tools precede the system prompt, so the tool schemas are
+  cached too), plus the top-level automatic `cache_control`, a rolling breakpoint at the end of the
+  conversation. 2 of Anthropic's 4 breakpoints. Every other model gets the plain body.
+- **Everyone else** (OpenAI, Gemini 2.5+, DeepSeek, Grok…) caches a byte-identical prefix
+  automatically, so the prefix is kept stable: tools sorted by name and reused between rounds, the
+  system prompt built once per conversation (its date line fixed at build time), history only
+  appended to. `session_id` (random per conversation; `sma-task-run-<runId>` for tasks) keeps
+  OpenRouter on one provider.
+- **Old tool results** (browser only; a task run is one turn): at the start of each user turn,
+  `elideOldToolResults` replaces tool results over 2,000 characters from before the previous turn with
+  `[earlier result of <tool> (<n> chars) omitted …; call the tool again if you need it]`. Permanent
+  and only at turn boundaries, so every round of a turn keeps a stable cached prefix; tool-call
+  pairing is untouched and the tool cards keep the full result.
+- Usage (`prompt_tokens_details.cached_tokens`, `cache_write_tokens`, `cost`) is summed per turn
+  (`runTurn` → `usage`, `ui.onUsage`, `state.usage`) and per run (`AgentLoop.Result`). Not yet shown in
+  the chat UI.
 - `ProfileMaintenance` refreshes delegated accounts untouched for 20 hours once a day, so a weekly
   task still finds a live token, and deletes profiles idle for `PROFILE_IDLE_DAYS`.
 
@@ -946,8 +977,15 @@ Deliberately **not** wrapped: `impersonate-user` (no impersonation), `show-passw
 `reset-app-password` (returns a secret), every export / download / import endpoint, message-archive
 and chat-history search (every user's mail and chats), `generate-key` and the key-resetting
 `dkim-settings`, `subscriber-remove-all`, `propagate-settings`, `user-detach`, `webrtc-config`
-(TURN credentials), LDAP / auth-provider endpoints. Every `domain_*` result has password, secret,
-token, credential and private-key string fields redacted.
+(TURN credentials), LDAP / auth-provider endpoints. Every `domain_*` **and sysadmin** result has
+password, secret, token, API-key, credential and private-key string fields redacted
+(`src/Core/SecretRedactor.cs`, shared; a DKIM *public* key is kept). `get_dkim_settings` returns only
+the DKIM fields of the domain settings, never the raw response.
+
+`search_log_files` returns a window, not the whole log: `maxChars` (default 20,000, cap 100,000),
+`offset`, `tail` (default true: newest first) and an optional `contains` line filter, with
+`totalChars`, `hasMore` and `nextOffset`. The slicing is `src/Core/TextWindow.cs`, for any large
+text result.
 
 ## SSRF guard
 

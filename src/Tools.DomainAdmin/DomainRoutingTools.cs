@@ -609,30 +609,8 @@ public sealed class DomainRoutingTools
         return JsonSerializer.SerializeToElement(node);
     }
 
-    private static void RedactNode(JsonNode? node)
-    {
-        switch (node)
-        {
-            case JsonObject obj:
-                var pairKey = obj["key"] is JsonValue k && k.GetValueKind() == JsonValueKind.String ? k.GetValue<string>() : null;
-                foreach (var key in obj.Select(p => p.Key).ToList())
-                {
-                    var value = obj[key];
-                    var secret = IsSecretKey(key) ||
-                                 (key.Equals("value", StringComparison.OrdinalIgnoreCase) && pairKey is not null && IsSecretKey(pairKey));
-                    if (secret && value is JsonValue v && v.GetValueKind() == JsonValueKind.String &&
-                        !string.IsNullOrEmpty(v.GetValue<string>()))
-                        obj[key] = "[redacted]";
-                    else
-                        RedactNode(value);
-                }
-                break;
-            case JsonArray array:
-                foreach (var item in array)
-                    RedactNode(item);
-                break;
-        }
-    }
+    private static void RedactNode(JsonNode? node) =>
+        SmarterMailMcp.Core.SecretRedactor.RedactNode(node, SecretKeyFragments, pairValues: true);
 
     /// <summary>Objects merge key by key; anything else (arrays, values, null) replaces.</summary>
     private static void Merge(JsonObject target, JsonObject changes)

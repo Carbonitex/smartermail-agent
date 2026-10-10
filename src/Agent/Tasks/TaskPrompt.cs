@@ -17,10 +17,20 @@ public static class TaskPrompt
         [AccountRole.SysAdmin] = "System admin — server-wide administration: every domain, users on any domain, the spool, security, certificates, DKIM and monitoring. A system admin has no mailbox, so mailbox tools never run as it.",
     };
 
+    /// <summary>
+    /// What came before this run: the start of the last real run that ended ok, and the start of the
+    /// latest real run when that one did not (otherwise null). Test runs are never passed in.
+    /// </summary>
+    public sealed record History(DateTimeOffset? LastSuccess, DateTimeOffset? LatestFailure)
+    {
+        public static readonly History None = new(null, null);
+    }
+
     public static string Build(
         string taskName, IReadOnlyList<Account> accounts, IReadOnlyCollection<string> allowedWrites, int maxWrites,
-        bool dryRun, DateTimeOffset now, TimeZoneInfo zone)
+        bool dryRun, DateTimeOffset now, TimeZoneInfo zone, History? history = null)
     {
+        history ??= History.None;
         var local = TimeZoneInfo.ConvertTime(now, zone);
         var many = accounts.Count > 1;
         var mailbox = accounts.FirstOrDefault(a => a.Role != AccountRole.SysAdmin);
@@ -35,6 +45,7 @@ public static class TaskPrompt
             "",
             many ? "# Accounts this task can use" : "# The account this task can use",
         };
+        lines.InsertRange(5, HistoryLines(history, zone));   // right after "Current date and time"
         lines.AddRange(accounts.Select(Describe));
         lines.Add("");
         lines.Add("# What each role can reach");
@@ -82,6 +93,21 @@ public static class TaskPrompt
         lines.Add("- Times are local to the user. Be concise.");
 
         return string.Join("\n", lines);
+    }
+
+    private static List<string> HistoryLines(History h, TimeZoneInfo zone)
+    {
+        string At(DateTimeOffset t) => $"{TimeZoneInfo.ConvertTime(t, zone):yyyy-MM-dd HH:mm} ({zone.Id})";
+        var lines = new List<string>();
+        if (h.LastSuccess is { } ok)
+            lines.Add($"- Previous successful run: {At(ok)}. Report only items since then unless the task says otherwise.");
+        else
+            lines.Add("- This is the first run of this task: there is no earlier run to compare with.");
+        if (h.LatestFailure is { } bad)
+            lines.Add(h.LastSuccess is null
+                ? $"- The most recent attempt ({At(bad)}) did not complete, so treat nothing as already reported."
+                : $"- The most recent attempt ({At(bad)}) did not complete, so anything since the previous successful run may not have been reported.");
+        return lines;
     }
 
     private static string Describe(Account a)

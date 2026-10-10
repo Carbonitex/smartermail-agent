@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
@@ -15,7 +16,7 @@ public sealed class ServerTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/get-version");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -34,7 +35,7 @@ public sealed class ServerTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/services");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -57,7 +58,7 @@ public sealed class ServerTools
             var serviceList = services.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
             var response = await userContext.PostAsync<JsonElement>("/api/v1/settings/sysadmin/start-services",
                 new { input = serviceList });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -80,7 +81,7 @@ public sealed class ServerTools
             var serviceList = services.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
             var response = await userContext.PostAsync<JsonElement>("/api/v1/settings/sysadmin/stop-services",
                 new { input = serviceList });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -99,7 +100,7 @@ public sealed class ServerTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/dashboard-stats");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -118,7 +119,7 @@ public sealed class ServerTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/troubleshooting-counts");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {

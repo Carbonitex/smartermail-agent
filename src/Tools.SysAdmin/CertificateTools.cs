@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
@@ -20,7 +21,7 @@ public sealed class CertificateTools
             var sort = string.IsNullOrEmpty(sortBy) ? "name" : sortBy;
             var response = await userContext.GetAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/ssl-certificates/{Uri.EscapeDataString(sort)}/{sortDescending.ToString().ToLower()}");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -39,7 +40,7 @@ public sealed class CertificateTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/ssl-certificate-counts");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -68,7 +69,7 @@ public sealed class CertificateTools
                 password,
                 length = data.Length
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -93,7 +94,7 @@ public sealed class CertificateTools
             {
                 certFilenames = filenames
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -117,7 +118,7 @@ public sealed class CertificateTools
             var sort = string.IsNullOrEmpty(sortBy) ? "name" : sortBy;
             var response = await userContext.GetAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/acme-certificates/{Uri.EscapeDataString(sort)}/{sortDescending.ToString().ToLower()}");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -136,7 +137,7 @@ public sealed class CertificateTools
         try
         {
             var response = await userContext.PostAsync<JsonElement>("/api/v1/settings/sysadmin/acme-certificates/refresh", new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -161,7 +162,7 @@ public sealed class CertificateTools
             {
                 input = guids
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {

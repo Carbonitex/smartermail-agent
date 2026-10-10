@@ -23,22 +23,27 @@ public sealed class AgentLoop(OpenRouterClient llm)
         bool IsError = false, bool Simulated = false);
 
     /// <param name="Stop"><c>completed</c>, <c>max_rounds</c>, <c>length</c>, <c>content_filter</c>, <c>cancelled</c> or <c>error</c>.</param>
+    /// <param name="CachedTokens">Of <paramref name="PromptTokens"/>, how many were read from the provider's prompt cache.</param>
+    /// <param name="Cost">What OpenRouter charged for the run's requests, in credits.</param>
     public sealed record Result(
         string Stop, string? Final, IReadOnlyList<Step> Steps, int ToolCalls, long PromptTokens, long CompletionTokens,
-        string? ErrorCode, string? ErrorMessage);
+        string? ErrorCode, string? ErrorMessage, long CachedTokens = 0, long CacheWriteTokens = 0, double Cost = 0);
 
     public async Task<Result> RunAsync(
         string apiKey, string model, string systemPrompt, string userPrompt, JsonArray tools,
         Func<string, IReadOnlyDictionary<string, JsonElement>?, CancellationToken, Task<ToolResult>> callTool,
-        int maxRounds, CancellationToken ct)
+        int maxRounds, CancellationToken ct, string? sessionId = null)
     {
+        // A run is one user turn, so nothing here is ever elided (the browser's elideOldToolResults works at
+        // turn boundaries) and the request prefix only grows: every round can read the previous one's cache.
         var messages = new JsonArray
         {
             new JsonObject { ["role"] = "system", ["content"] = systemPrompt },
             new JsonObject { ["role"] = "user", ["content"] = userPrompt },
         };
         var steps = new List<Step>();
-        long promptTokens = 0, completionTokens = 0;
+        long promptTokens = 0, completionTokens = 0, cachedTokens = 0, cacheWriteTokens = 0;
+        double cost = 0;
         var toolCalls = 0;
         string? final = null;
 
@@ -46,9 +51,12 @@ public sealed class AgentLoop(OpenRouterClient llm)
         {
             for (var round = 0; ; round++)
             {
-                var completion = await llm.CompleteAsync(apiKey, model, messages, tools, ct);
+                var completion = await llm.CompleteAsync(apiKey, model, messages, tools, ct, sessionId);
                 promptTokens += completion.PromptTokens;
                 completionTokens += completion.CompletionTokens;
+                cachedTokens += completion.CachedTokens;
+                cacheWriteTokens += completion.CacheWriteTokens;
+                cost += completion.Cost;
 
                 if (!string.IsNullOrWhiteSpace(completion.Content) || completion.ToolCalls.Count > 0)
                 {
@@ -132,7 +140,7 @@ public sealed class AgentLoop(OpenRouterClient llm)
             if (notice is not null)
                 steps.Add(new Step("notice", notice));
             return new Result(stop, final, steps, toolCalls, promptTokens, completionTokens, code,
-                code is null ? null : notice);
+                code is null ? null : notice, cachedTokens, cacheWriteTokens, cost);
         }
     }
 

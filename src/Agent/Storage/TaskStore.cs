@@ -211,6 +211,25 @@ public sealed class TaskStore(DataStore db)
         return list;
     }
 
+    /// <summary>
+    /// The runs a new run's prompt looks back on: the latest finished, real (not test) run that ended
+    /// <c>ok</c>, and the latest finished real run of any outcome. Test runs and the run named by
+    /// <paramref name="excludeRunId"/> (the one being started) never count.
+    /// </summary>
+    public (TaskRunRow? LastOk, TaskRunRow? Latest) PreviousRuns(string taskId, string excludeRunId)
+    {
+        using var c = db.Open();
+        TaskRunRow? One(string extra)
+        {
+            using var cmd = c.Command(
+                $"SELECT {RunColumns.Replace("transcript", "NULL")} FROM task_runs WHERE task_id = $t AND id != $x AND dry_run = 0 " +
+                $"AND status != 'running' {extra} ORDER BY started_at DESC LIMIT 1", ("$t", taskId), ("$x", excludeRunId));
+            using var r = cmd.ExecuteReader();
+            return r.Read() ? ReadRun(r) : null;
+        }
+        return (One("AND status = 'ok'"), One(""));
+    }
+
     public TaskRunRow? Run(string profileId, string id)
     {
         using var c = db.Open();

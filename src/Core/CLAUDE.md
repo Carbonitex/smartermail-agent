@@ -13,6 +13,8 @@ Shared .NET library for everything in this repo. Provides authentication, HTTP c
 - `Models/TokenData.cs` — Token data model (access token, refresh token, base URL, etc.)
 - `Models/SmarterMailApiException.cs` — API error exception with status code and response body
 - `Logging.cs` — Debug logging utilities
+- `SecretRedactor.cs` — blanks non-empty strings under secret-like keys (password, secret, apikey, privatekey, token, credential, activationkey) at any depth, optionally `{key,value}` pairs; `privatekey` does not match `publicKey`. Used by every Tools.DomainAdmin and Tools.SysAdmin result that passes an API response through. Tests: `tests/SmarterMail.Tests/RedactionTests.cs`
+- `TextWindow.cs` — `Slice` / `FilterLines` / `ClampMaxChars`: line-boundary windows over large text (forward or from the end), with `totalChars` / `hasMore` / `nextOffset`; used by `search_log_files`
 
 ## Usage
 

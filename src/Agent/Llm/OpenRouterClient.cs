@@ -24,24 +24,17 @@ public sealed class OpenRouterClient(HttpClient http, ServerOptions options, ILo
 
     public sealed record ToolCall(string Id, string Name, string Arguments);
 
+    /// <param name="CachedTokens">Prompt tokens read from the provider's cache (<c>prompt_tokens_details.cached_tokens</c>).</param>
+    /// <param name="CacheWriteTokens">Prompt tokens written to the cache (<c>prompt_tokens_details.cache_write_tokens</c>).</param>
+    /// <param name="Cost">What OpenRouter charged for the request (<c>usage.cost</c>, credits).</param>
     public sealed record Completion(
-        string? Content, IReadOnlyList<ToolCall> ToolCalls, string? FinishReason, long PromptTokens, long CompletionTokens);
+        string? Content, IReadOnlyList<ToolCall> ToolCalls, string? FinishReason, long PromptTokens, long CompletionTokens,
+        long CachedTokens = 0, long CacheWriteTokens = 0, double Cost = 0);
 
     public async Task<Completion> CompleteAsync(
-        string apiKey, string model, JsonArray messages, JsonArray? tools, CancellationToken ct)
+        string apiKey, string model, JsonArray messages, JsonArray? tools, CancellationToken ct, string? sessionId = null)
     {
-        var body = new JsonObject
-        {
-            ["model"] = model,
-            ["messages"] = messages.DeepClone(),
-            ["max_tokens"] = MaxTokens,
-            ["stream"] = false,
-        };
-        if (tools is { Count: > 0 })
-        {
-            body["tools"] = tools.DeepClone();
-            body["tool_choice"] = "auto";
-        }
+        var body = BuildBody(model, messages, tools, sessionId);
 
         for (var attempt = 1; ; attempt++)
         {
@@ -56,6 +49,66 @@ public sealed class OpenRouterClient(HttpClient http, ServerOptions options, ILo
             }
         }
     }
+
+    /// <summary>An Anthropic model on OpenRouter: <c>anthropic/…</c> or a <c>~anthropic/…</c> alias.</summary>
+    public static bool IsAnthropicModel(string? model) =>
+        model is not null && (model.StartsWith("anthropic/", StringComparison.OrdinalIgnoreCase) ||
+                              model.StartsWith("~anthropic/", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The request body, with prompt caching laid out the way the browser does it (<c>buildRequestBody</c> in
+    /// <c>wwwroot/js/llm.js</c>; see the comment there). Automatic-caching providers (OpenAI, DeepSeek, Grok,
+    /// Gemini 2.5+…) need only a byte-stable prefix: the tool list is in catalog (name) order, the system
+    /// prompt is built once per run, and messages are only appended. Anthropic needs <c>cache_control</c>: an
+    /// explicit breakpoint on the system prompt (tools → system → messages, so it covers the tool schemas) plus
+    /// the top-level automatic one, which follows the end of the conversation round by round. Two of Anthropic's
+    /// four slots. Nobody else sees either. <paramref name="messages"/> is not modified.
+    /// </summary>
+    public static JsonObject BuildBody(string model, JsonArray messages, JsonArray? tools, string? sessionId = null)
+    {
+        var anthropic = IsAnthropicModel(model);
+        var sent = (JsonArray)messages.DeepClone();
+        if (anthropic)
+        {
+            var system = sent.OfType<JsonObject>().FirstOrDefault(m => m["role"]?.GetValue<string>() == "system");
+            if (system?["content"] is JsonValue value && value.TryGetValue<string>(out var text) && text.Length > 0)
+            {
+                system["content"] = new JsonArray(new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = text,
+                    ["cache_control"] = Ephemeral(),
+                });
+            }
+        }
+
+        var body = new JsonObject
+        {
+            ["model"] = model,
+            ["messages"] = sent,
+            ["max_tokens"] = MaxTokens,
+            ["stream"] = false,
+        };
+        if (tools is { Count: > 0 })
+        {
+            body["tools"] = tools.DeepClone();
+            body["tool_choice"] = "auto";
+        }
+        if (anthropic)
+            body["cache_control"] = Ephemeral();
+        // Sticky provider routing from the first request, not only after the first cache hit.
+        if (!string.IsNullOrEmpty(sessionId))
+            body["session_id"] = sessionId.Length > 256 ? sessionId[..256] : sessionId;
+        return body;
+    }
+
+    private static JsonObject Ephemeral() => new() { ["type"] = "ephemeral" };
+
+    private static long Long(JsonNode? node) =>
+        node is JsonValue v && v.GetValueKind() == JsonValueKind.Number && v.TryGetValue<double>(out var d) ? (long)d : 0;
+
+    private static double Double(JsonNode? node) =>
+        node is JsonValue v && v.GetValueKind() == JsonValueKind.Number && v.TryGetValue<double>(out var d) ? d : 0;
 
     private async Task<Completion> SendAsync(string apiKey, JsonObject body, CancellationToken ct)
     {
@@ -114,13 +167,17 @@ public sealed class OpenRouterClient(HttpClient http, ServerOptions options, ILo
                 }
             }
 
+            // OpenRouter always sends usage now (`usage: { include: true }` is deprecated and a no-op).
             var usage = json?["usage"];
             return new Completion(
                 message?["content"]?.GetValueKind() == JsonValueKind.String ? message["content"]!.GetValue<string>() : null,
                 calls,
                 choice["finish_reason"]?.GetValue<string>() ?? (calls.Count > 0 ? "tool_calls" : null),
-                usage?["prompt_tokens"]?.GetValue<long>() ?? 0,
-                usage?["completion_tokens"]?.GetValue<long>() ?? 0);
+                Long(usage?["prompt_tokens"]),
+                Long(usage?["completion_tokens"]),
+                Long(usage?["prompt_tokens_details"]?["cached_tokens"]),
+                Long(usage?["prompt_tokens_details"]?["cache_write_tokens"]),
+                Double(usage?["cost"]));
         }
     }
 

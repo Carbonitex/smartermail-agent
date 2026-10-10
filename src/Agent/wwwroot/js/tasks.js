@@ -284,6 +284,22 @@ function renderEditor(task) {
 
 /* ----------------------------------------------------------------- runs */
 
+/** 41200 -> "41k", 1234 -> "1.2k", 800 -> "800"; null/undefined -> null. */
+export function formatCount(n) {
+  if (n == null || !Number.isFinite(n)) return null;
+  if (n < 1000) return String(n);
+  if (n < 10000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  if (n < 1000000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
+}
+
+/** "41k in / 1.2k out", or "" when the run has no counts (older runs, failures before a model call). */
+export function formatTokens(r) {
+  const i = formatCount(r?.promptTokens), o = formatCount(r?.completionTokens);
+  if (i == null && o == null) return '';
+  return `${i ?? '?'} in / ${o ?? '?'} out`;
+}
+
 async function renderRuns(task, { watch = false } = {}) {
   clearInterval(poll);
   poll = null;
@@ -303,7 +319,8 @@ async function renderRuns(task, { watch = false } = {}) {
       text.textContent = `${new Date(r.startedAt).toLocaleString()} · ${task ? '' : names.get(r.taskId) + ' · '}` +
         `${r.trigger === 'schedule' ? 'scheduled' : 'manual'}${r.dryRun ? ', test' : ''} · ` +
         `${r.status === 'running' ? 'running…' : r.status}${r.errorCode && r.status !== 'running' ? ` (${r.errorMessage || r.errorCode})` : ''}` +
-        (r.status !== 'running' ? ` · ${r.toolCalls} tool call${r.toolCalls === 1 ? '' : 's'}, ${r.writes} change${r.writes === 1 ? '' : 's'}` : '');
+        (r.status !== 'running' ? ` · ${r.toolCalls} tool call${r.toolCalls === 1 ? '' : 's'}, ${r.writes} change${r.writes === 1 ? '' : 's'}` +
+          (formatTokens(r) ? ` · ${formatTokens(r)}` : '') : '');
       row.append(text);
       if (r.status !== 'running') row.append(button('Open', () => renderRun(r, task)));
       parts.push(row);
@@ -341,7 +358,8 @@ async function renderRun(summary, task) {
 
   if (transcript) {
     parts.push(para(`${transcript.taskName} · ${new Date(transcript.startedAt).toLocaleString()} · ${transcript.model}` +
-      (transcript.dryRun ? ' · test run (changes simulated)' : '') + (transcript.emailed ? ' · emailed' : '')));
+      (transcript.dryRun ? ' · test run (changes simulated)' : '') + (transcript.emailed ? ' · emailed' : '') +
+      (formatTokens(summary) ? ` · ${formatTokens(summary)}` : '')));
     const report = div('msg assistant run-report');
     report.innerHTML = renderMarkdown(transcript.final || transcript.error || '(no report)');   // escape-first renderer
     parts.push(report);

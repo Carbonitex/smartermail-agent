@@ -422,7 +422,12 @@ input:focus, textarea:focus, select:focus {
   border-left: 3px solid var(--accent-dim); padding-left: 10px; color: var(--text-dim);
 }
 .msg.assistant hr { border: none; border-top: 1px solid var(--border-soft); }
+.msg.assistant .table-wrap { overflow-x: auto; max-width: 100%; margin: .5em 0; }
 .msg.assistant table { border-collapse: collapse; }
+.msg.assistant th, .msg.assistant td { border: 1px solid var(--border-soft); padding: 4px 8px; text-align: left; vertical-align: top; }
+.msg.assistant th { background: oklch(14% 0 0); font-weight: 600; }
+.msg.assistant th.al-c, .msg.assistant td.al-c { text-align: center; }
+.msg.assistant th.al-r, .msg.assistant td.al-r { text-align: right; }
 
 .cursor {
   display: inline-block; width: 8px; height: 1.05em; vertical-align: text-bottom;

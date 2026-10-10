@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
@@ -9,7 +10,7 @@ namespace SmarterMailMcp.SystemAdmin.Tools;
 public sealed class DkimTools
 {
     [McpServerTool(ReadOnly = true)]
-    [Description("Get DKIM settings for a domain")]
+    [Description("Get a domain's DKIM settings: selector, public key (for the DNS record), key size, pending rollover, active state, canonicalization and signed header fields. Nothing else from the domain settings is returned.")]
     public static async Task<string> GetDkimSettings(
         [Description("Domain name")] string domain,
         UserContext userContext)
@@ -18,10 +19,7 @@ public sealed class DkimTools
         {
             var response = await userContext.GetAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/domain-settings/{Uri.EscapeDataString(domain)}");
-            // Extract DKIM-related fields from domain settings
-            if (response.TryGetProperty("settings", out var settings) && settings.TryGetProperty("dkim", out var dkim))
-                return JsonSerializer.Serialize(new { dkim, success = true });
-            return JsonSerializer.Serialize(new { success = true, message = "No DKIM settings found in domain settings", raw = response });
+            return ShapeDkimSettings(response);
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -31,6 +29,36 @@ public sealed class DkimTools
         {
             return JsonSerializer.Serialize(new { success = false, error = ex.Message });
         }
+    }
+
+    private static readonly string[] DkimFields =
+    [
+        "selector", "publicKey", "keySize", "pending", "isActive", "forced",
+        "dkimCanonicalizationAlgorithmBody", "dkimCanonicalizationAlgorithmHeader",
+        "dkimHeaderFieldOption", "dkimHeaderFields", "maxMessageSign"
+    ];
+
+    /// <summary>
+    /// The domain-settings response also carries unrelated sections (authentication providers with
+    /// passwords, and more), so only the DKIM section's known fields are copied out; there is no raw
+    /// fallback. The result is redacted as well. A missing DKIM section is an error.
+    /// </summary>
+    public static string ShapeDkimSettings(JsonElement response)
+    {
+        var holder = response;
+        if (response.ValueKind == JsonValueKind.Object && response.TryGetProperty("domainSettings", out var ds))
+            holder = ds;
+
+        if (holder.ValueKind != JsonValueKind.Object ||
+            !holder.TryGetProperty("domainKeysSettings", out var dk) || dk.ValueKind != JsonValueKind.Object)
+            return JsonSerializer.Serialize(new { success = false, error = "No DKIM settings were found for this domain." });
+
+        var picked = new System.Text.Json.Nodes.JsonObject();
+        foreach (var name in DkimFields)
+            if (dk.TryGetProperty(name, out var value))
+                picked[name] = System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText());
+        SecretRedactor.RedactNode(picked);
+        return JsonSerializer.Serialize(new { success = true, dkim = picked });
     }
 
     [McpServerTool]
@@ -59,7 +87,7 @@ public sealed class DkimTools
                     fields = fieldList,
                     maxMessageSign = maxMessageSign > 0 ? maxMessageSign : 100
                 });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -83,7 +111,7 @@ public sealed class DkimTools
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/dkim-enable/{Uri.EscapeDataString(domain)}/{forceActivation.ToString().ToLower()}",
                 new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -105,7 +133,7 @@ public sealed class DkimTools
         {
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/dkim-disable/{Uri.EscapeDataString(domain)}", new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -129,7 +157,7 @@ public sealed class DkimTools
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/dkim-create-rollover/{Uri.EscapeDataString(domain)}/{keySize}",
                 new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -151,7 +179,7 @@ public sealed class DkimTools
         {
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/dkim-delete-rollover/{Uri.EscapeDataString(domain)}", new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {

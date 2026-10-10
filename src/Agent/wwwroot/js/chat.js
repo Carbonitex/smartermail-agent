@@ -20,7 +20,7 @@ import { initTasks, renderTasksButton, refreshBadge as refreshTasksBadge } from 
 import { storage, DEFAULT_MODEL } from './storage.js';
 import { renderMarkdown, escapeHtml, prettyJson } from './markdown.js';
 import {
-  runTurn, toolsToOpenAI, buildSystemPrompt, fetchToolModels, MAX_TOOL_ROUNDS,
+  runTurn, addUsage, toolsToOpenAI, buildSystemPrompt, fetchToolModels, MAX_TOOL_ROUNDS,
   roleLabel, hasMailbox, toolGroups, filterToolsByCategory, sessionAccounts
 } from './llm.js';
 
@@ -36,6 +36,8 @@ const state = {
   allowChangesDefault: false,   // profile setting: accounts added to a profile chat start read-write
   addMode: false,       // the login view is adding an account to the live chat
   messages: [],         // OpenAI message array, in memory only
+  conversationId: null, // random id per conversation: OpenRouter's session_id (sticky routing keeps its cache warm)
+  usage: null,          // token usage summed over this conversation (llm.js addUsage shape), for a later UI
   busy: false,
   abort: null,          // AbortController for the active turn
   queue: [],            // messages typed while a turn is streaming
@@ -331,6 +333,7 @@ function showLogin(message, webmailHost) {
   state.toolList = [];
   state.tools = [];
   state.messages = [];
+  resetConversation();
   state.queue = [];
   closeDevicePopover();
   renderRememberedPanel();
@@ -695,6 +698,7 @@ async function enterChat(session) {
   state.toolList = [];
   state.tools = [];
   state.messages = [{ role: 'system', content: systemPrompt() }];
+  resetConversation();
 
   setLoginMode(false);
   renderAccounts();
@@ -722,6 +726,21 @@ function renderServerUi() {
   renderProfileMenu();
   renderTasksButton();
   refreshTasksBadge();
+}
+
+/** A new conversation: a fresh OpenRouter session id and usage totals. */
+function resetConversation() {
+  state.conversationId = null;
+  state.usage = null;
+}
+
+function conversationId() {
+  if (!state.conversationId) {
+    state.conversationId = globalThis.crypto && typeof crypto.randomUUID === 'function'
+      ? `sma-${crypto.randomUUID()}`
+      : `sma-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+  return state.conversationId;
 }
 
 /** The system prompt for the current accounts and Tools-menu selection. */
@@ -1507,6 +1526,7 @@ function wireChat() {
   el.btnNewChat.addEventListener('click', () => {
     if (state.busy) stopTurn();
     state.messages = state.session ? [{ role: 'system', content: systemPrompt() }] : [];
+    resetConversation();
     state.queue = [];
     renderQueue();
     clearTranscript();
@@ -1773,8 +1793,10 @@ async function drive() {
       signal: controller.signal,
       maxToolRounds: MAX_TOOL_ROUNDS,
       url: completionsUrl(),
+      sessionId: conversationId(),
       callTool: (name, args) => api.callTool(name, args),
       ui: {
+        onUsage(round) { state.usage = addUsage(state.usage, round); },
         onAssistantStart() { bubble = null; buffer = ''; },
         onContent(chunk, full) {
           if (!bubble) bubble = addAssistantBubble();

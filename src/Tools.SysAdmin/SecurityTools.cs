@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
@@ -26,7 +27,7 @@ public sealed class SecurityTools
                 startindex = 0,
                 count = count > 0 ? count : 100
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -52,7 +53,7 @@ public sealed class SecurityTools
             {
                 ipBlocks
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -79,7 +80,7 @@ public sealed class SecurityTools
                 {
                     searchParams = new { Skip = 0, Take = 1000, Search = "" }
                 });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -108,7 +109,7 @@ public sealed class SecurityTools
                 address,
                 description = description ?? ""
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -132,7 +133,7 @@ public sealed class SecurityTools
             {
                 address
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -153,7 +154,7 @@ public sealed class SecurityTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/smtp-block-rules");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -172,7 +173,7 @@ public sealed class SecurityTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/smtp-auth-bypass");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -193,7 +194,7 @@ public sealed class SecurityTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/spam-assassin-servers");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -212,7 +213,7 @@ public sealed class SecurityTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/rspamd-servers");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {

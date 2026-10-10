@@ -707,26 +707,6 @@ public sealed class DomainSecurityTools
     private static readonly string[] SecretKeyFragments = ["password", "secret", "apikey", "privatekey", "activationkey"];
 
     /// <summary>Blanks non-empty strings under password/secret/private-key-like property names.</summary>
-    private static void RedactNode(JsonNode? node)
-    {
-        switch (node)
-        {
-            case JsonObject obj:
-                foreach (var key in obj.Select(p => p.Key).ToList())
-                {
-                    var value = obj[key];
-                    if (value is JsonValue v && v.GetValueKind() == JsonValueKind.String &&
-                        SecretKeyFragments.Any(f => key.Contains(f, StringComparison.OrdinalIgnoreCase)) &&
-                        !string.IsNullOrEmpty(v.GetValue<string>()))
-                        obj[key] = "[redacted]";
-                    else
-                        RedactNode(value);
-                }
-                break;
-            case JsonArray array:
-                foreach (var item in array)
-                    RedactNode(item);
-                break;
-        }
-    }
+    private static void RedactNode(JsonNode? node) =>
+        SmarterMailMcp.Core.SecretRedactor.RedactNode(node, SecretKeyFragments);
 }

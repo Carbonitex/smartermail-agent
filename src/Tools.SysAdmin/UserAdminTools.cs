@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
@@ -17,7 +18,7 @@ public sealed class UserAdminTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>($"/api/v1/settings/sysadmin/list-users/{Uri.EscapeDataString(domain)}");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -40,7 +41,7 @@ public sealed class UserAdminTools
         {
             var response = await userContext.GetAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/search-users/{Uri.EscapeDataString(domain)}/{Uri.EscapeDataString(search)}");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -65,7 +66,7 @@ public sealed class UserAdminTools
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/users-delete/{Uri.EscapeDataString(domain)}",
                 new { input = userList });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -91,7 +92,7 @@ public sealed class UserAdminTools
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/users-disable/{disable.ToString().ToLower()}/{Uri.EscapeDataString(domain)}",
                 new { input = userList });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -121,7 +122,7 @@ public sealed class UserAdminTools
                 ascending = true,
                 search = search ?? ""
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {

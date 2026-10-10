@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
@@ -15,7 +16,7 @@ public sealed class DomainTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/domains");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -36,7 +37,7 @@ public sealed class DomainTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>($"/api/v1/settings/sysadmin/domain/{Uri.EscapeDataString(domain)}");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -77,7 +78,7 @@ public sealed class DomainTools
             };
 
             var response = await userContext.PostAsync<JsonElement>("/api/v1/settings/sysadmin/domain-put", payload);
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -101,7 +102,7 @@ public sealed class DomainTools
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/domain-delete/{Uri.EscapeDataString(domain)}/{deleteFiles.ToString().ToLower()}",
                 new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -127,7 +128,7 @@ public sealed class DomainTools
                 oldDomainName,
                 newDomainName
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -148,7 +149,7 @@ public sealed class DomainTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>($"/api/v1/settings/sysadmin/domain-settings/{Uri.EscapeDataString(domain)}");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -170,7 +171,7 @@ public sealed class DomainTools
         {
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/reload-domain/{Uri.EscapeDataString(domain)}", new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {

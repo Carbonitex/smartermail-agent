@@ -429,12 +429,158 @@ export function hostOf(url) {
   try { return new URL(url).host; } catch { return url || 'unknown'; }
 }
 
+/* ---------------------------------------------------------- prompt caching */
+
+/*
+ * Every round of a turn resends the system prompt, every tool schema (up to a
+ * few hundred) and the whole history, so prompt caching is most of the bill.
+ * OpenRouter (openrouter.ai/docs/features/prompt-caching):
+ *
+ *  - OpenAI, DeepSeek, Grok, Moonshot, Groq, Z.AI and Gemini 2.5+ cache
+ *    automatically by prefix. Nothing to send; the prefix just has to be
+ *    byte-identical from one request to the next. It is: the tool list comes
+ *    from the server sorted by name and is serialised from the same objects
+ *    every round, the system prompt only changes when the accounts or the
+ *    Tools menu change (its date line is fixed when the prompt is built), and
+ *    history is only ever appended to (see elideOldToolResults for the one
+ *    exception, made at turn boundaries only).
+ *  - Anthropic needs `cache_control`. We send two: an explicit breakpoint on
+ *    the system prompt (Anthropic orders tools → system → messages, so this
+ *    caches the tool schemas too, and survives anything that rewrites the
+ *    conversation), and the top-level "automatic" `cache_control`, which puts a
+ *    breakpoint on the last cacheable block and moves it forward as the
+ *    conversation grows: each round reads the previous round's prefix. That is
+ *    two of Anthropic's four breakpoint slots. Below the model's minimum
+ *    cacheable size (512–4,096 tokens) Anthropic simply does not cache; no error.
+ *  - Gemini's explicit caching bills writes plus storage while its implicit
+ *    caching is free, so Gemini is left on implicit caching (a stable prefix).
+ *
+ * Only `anthropic/*` models get the content-part array and the extra field, so
+ * no other provider ever sees them.
+ */
+
+const EPHEMERAL = Object.freeze({ type: 'ephemeral' });
+
+/** An Anthropic model on OpenRouter (`anthropic/claude-…`, or a `~anthropic/…` alias). */
+export function isAnthropicModel(model) {
+  return /^~?anthropic\//i.test(String(model || ''));
+}
+
+/**
+ * The chat-completions request body. Pure, so the cache layout can be tested.
+ * `messages` is never mutated; for Anthropic the system message is copied with
+ * its text wrapped in a content part that carries the breakpoint.
+ */
+export function buildRequestBody({ model, messages, tools, stream = true, maxTokens = 8192, sessionId = null }) {
+  let sent = messages;
+  const anthropic = isAnthropicModel(model);
+  if (anthropic) {
+    const i = (messages || []).findIndex((m) => m && m.role === 'system');
+    const sys = i >= 0 ? messages[i] : null;
+    if (sys && typeof sys.content === 'string' && sys.content) {
+      sent = messages.slice();
+      sent[i] = { ...sys, content: [{ type: 'text', text: sys.content, cache_control: { ...EPHEMERAL } }] };
+    }
+  }
+
+  const body = { model, messages: sent, stream, max_tokens: maxTokens };
+  if (tools && tools.length) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+  }
+  if (anthropic) body.cache_control = { ...EPHEMERAL };
+  // Sticky provider routing from the first request, not only after the first cache hit.
+  if (sessionId) body.session_id = String(sessionId).slice(0, 256);
+  return body;
+}
+
+/**
+ * OpenRouter's usage object (always sent; the last SSE frame when streaming)
+ * in a flat shape: `{ promptTokens, completionTokens, cachedTokens,
+ * cacheWriteTokens, cost }`. `cachedTokens` are prompt tokens read from cache.
+ */
+export function normaliseUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const details = usage.prompt_tokens_details || {};
+  return {
+    promptTokens: num(usage.prompt_tokens),
+    completionTokens: num(usage.completion_tokens),
+    cachedTokens: num(details.cached_tokens),
+    cacheWriteTokens: num(details.cache_write_tokens),
+    cost: num(usage.cost)
+  };
+}
+
+/** Sum normalised usages; `requests` counts the ones that reported anything. */
+export function addUsage(total, u) {
+  const t = total || { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, cost: 0, requests: 0 };
+  if (!u) return t;
+  return {
+    promptTokens: t.promptTokens + u.promptTokens,
+    completionTokens: t.completionTokens + u.completionTokens,
+    cachedTokens: t.cachedTokens + u.cachedTokens,
+    cacheWriteTokens: t.cacheWriteTokens + u.cacheWriteTokens,
+    cost: t.cost + u.cost,
+    requests: t.requests + 1
+  };
+}
+
+/* ------------------------------------------------ old tool results (context) */
+
+/** Tool results at or under this many characters are always kept. */
+export const ELIDE_THRESHOLD = 2000;
+
+/**
+ * Replace large tool results from earlier turns with a short stub, in place.
+ *
+ * A turn starts at a user message. The current turn and the `keepTurns` turns
+ * before it keep their results whole, so a follow-up ("reply to the second
+ * one") still sees what it refers to; anything older over `threshold` becomes
+ * a stub naming the tool, which the model can simply call again. Only the
+ * model-facing history changes: the tool cards keep the full result.
+ *
+ * Caching: run this once, when a user turn starts, never between the rounds of
+ * a turn, so every round within a turn sends a byte-identical prefix. The edit
+ * is permanent and idempotent (a stub is far under the threshold), so a later
+ * turn never rewrites it again; each turn boundary invalidates at most the
+ * cached conversation from the first newly elided message on, while the
+ * tools + system breakpoint stays warm. tool_call ids and the tool messages
+ * themselves are untouched, so every call keeps its answer.
+ *
+ * @returns {number} how many results were replaced
+ */
+export function elideOldToolResults(messages, { threshold = ELIDE_THRESHOLD, keepTurns = 1 } = {}) {
+  if (!Array.isArray(messages)) return 0;
+  const users = [];
+  messages.forEach((m, i) => { if (m && m.role === 'user') users.push(i); });
+  const boundary = users.length > keepTurns ? users[users.length - 1 - keepTurns] : -1;
+  if (boundary <= 0) return 0;
+
+  const names = new Map();
+  let n = 0;
+  for (let i = 0; i < boundary; i++) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const c of m.tool_calls) if (c && c.id) names.set(c.id, (c.function && c.function.name) || 'a tool');
+      continue;
+    }
+    if (m.role !== 'tool' || typeof m.content !== 'string' || m.content.length <= threshold) continue;
+    const name = names.get(m.tool_call_id) || 'a tool';
+    m.content = `[earlier result of ${name} (${m.content.length.toLocaleString('en-US')} chars) omitted to save context; call the tool again if you need it]`;
+    n++;
+  }
+  return n;
+}
+
 /* ------------------------------------------------------------- the streamer */
 
 /**
- * One streamed completion. Resolves with the finished turn.
+ * One streamed completion. Resolves with the finished turn. `usage` is
+ * OpenRouter's raw usage object; `usageSummary` the normalised one.
  *
- * @returns {Promise<{content:string, reasoning:string, toolCalls:Array, finishReason:string|null, usage:object|null, aborted:boolean}>}
+ * @returns {Promise<{content:string, reasoning:string, toolCalls:Array, finishReason:string|null, usage:object|null, usageSummary:object|null, aborted:boolean}>}
  */
 export async function streamCompletion({
   apiKey,
@@ -442,6 +588,7 @@ export async function streamCompletion({
   messages,
   tools,
   signal,
+  sessionId,
   onContent,
   onReasoning,
   onToolCallProgress,
@@ -451,16 +598,7 @@ export async function streamCompletion({
 }) {
   if (!apiKey) throw new LlmError('No OpenRouter API key.', { code: 'bad_key' });
 
-  const body = {
-    model,
-    messages,
-    stream: true,
-    max_tokens: 8192
-  };
-  if (tools && tools.length) {
-    body.tools = tools;
-    body.tool_choice = 'auto';
-  }
+  const body = buildRequestBody({ model, messages, tools, sessionId });
 
   let res;
   try {
@@ -553,7 +691,7 @@ export async function streamCompletion({
   // Some models emit tool_calls without ever setting finish_reason
   if (!finishReason && acc.size > 0) finishReason = 'tool_calls';
 
-  return { content, reasoning, toolCalls: acc.toMessageToolCalls(), finishReason, usage, aborted };
+  return { content, reasoning, toolCalls: acc.toMessageToolCalls(), finishReason, usage, usageSummary: normaliseUsage(usage), aborted };
 }
 
 /* ----------------------------------------------------------------- the loop */
@@ -573,6 +711,13 @@ export async function streamCompletion({
  *   onToolStart(call)             {id, name, args, argsText}
  *   onToolEnd(call, result)       result = {isError, content}
  *   onNotice(text, kind)          non-fatal information for the user
+ *   onUsage(round, total)         token usage after each request (normaliseUsage
+ *                                 shape; total adds `requests`)
+ *
+ * Before the first request, large tool results from older turns are replaced
+ * with stubs (elideOldToolResults; `elide: false` turns that off). Resolves
+ * with `{ rounds, stopped, usage }`, `usage` summed over the turn's requests
+ * (null if none reported any).
  */
 export async function runTurn({
   messages,
@@ -583,11 +728,16 @@ export async function runTurn({
   callTool,
   maxToolRounds = MAX_TOOL_ROUNDS,
   url,
+  sessionId,
+  elide = true,
   ui = {},
   streamImpl = streamCompletion
 }) {
   let rounds = 0;
   let stopped = false;
+  let usage = null;
+
+  if (elide) elideOldToolResults(messages);
 
   for (;;) {
     if (ui.onAssistantStart) ui.onAssistantStart();
@@ -598,10 +748,17 @@ export async function runTurn({
       messages,
       tools,
       signal,
+      sessionId,
       url: url || OPENROUTER_URL,
       onContent: ui.onContent,
       onReasoning: ui.onReasoning
     });
+
+    const roundUsage = turn.usageSummary || normaliseUsage(turn.usage);
+    if (roundUsage) {
+      usage = addUsage(usage, roundUsage);
+      if (ui.onUsage) ui.onUsage(roundUsage, usage);
+    }
 
     const assistantMessage = { role: 'assistant', content: turn.content || '' };
     if (turn.toolCalls.length) assistantMessage.tool_calls = turn.toolCalls;
@@ -672,7 +829,7 @@ export async function runTurn({
     }
   }
 
-  return { rounds, stopped };
+  return { rounds, stopped, usage };
 }
 
 /** Keep one tool result from blowing the context window. */

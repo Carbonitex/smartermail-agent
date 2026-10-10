@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
@@ -18,7 +19,7 @@ public sealed class SpoolTools
         {
             var response = await userContext.GetAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/spool-message-count/{reload.ToString().ToLower()}");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -37,7 +38,7 @@ public sealed class SpoolTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/spool-message-counts");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -74,7 +75,7 @@ public sealed class SpoolTools
                     }
                 }
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -102,7 +103,7 @@ public sealed class SpoolTools
                     new { fileName, spoolName }
                 }
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -129,7 +130,7 @@ public sealed class SpoolTools
             {
                 spoolInput
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -156,7 +157,7 @@ public sealed class SpoolTools
             {
                 spoolInput
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -175,7 +176,7 @@ public sealed class SpoolTools
         try
         {
             var response = await userContext.PostAsync<JsonElement>("/api/v1/settings/sysadmin/reset-all-spool-messages", new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {

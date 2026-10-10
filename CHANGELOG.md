@@ -11,6 +11,13 @@ All notable changes to this project are documented here. The format follows
 - Agent (server mode): a Settings section in the Profile menu. A profile chooses its own session
   idle timeout (5 minutes up to the new `PROFILE_MAX_IDLE_MINUTES`, default 480), applied at once to
   every session of it, and whether accounts added to it start with changes allowed.
+- Agent: prompt caching on OpenRouter. Claude models cache the tool list, system prompt and
+  conversation; other providers' automatic caching now gets a stable prefix. Chat and scheduled tasks.
+- Agent: the chat renders GitHub-style markdown tables (alignment, inline formatting in cells,
+  horizontal scroll for wide tables).
+- Agent: scheduled runs are told when the previous successful run started (in the task's time zone)
+  and whether the latest attempt failed; task results show prompt / completion token counts.
+- Agent: token usage, cached tokens and cost are tracked per chat turn and per scheduled run.
 
 - `upload_attachment` takes the file as `base64Content` or `text` (with `fileName`), so remote
   clients can attach files they have. New `inline=true` embeds an image: SmarterMail assigns the
@@ -25,12 +32,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Agent: large tool results from older chat turns are no longer re-sent to the model (the tool cards
+  keep them); the model calls the tool again if it needs one.
+- `search_log_files` returns a window (`maxChars`, `offset`, `tail`, optional `contains`) with
+  `totalChars`, `hasMore` and `nextOffset`, instead of a whole day's log in one result.
 - Agent: the default model is Claude Haiku 5.5 (`anthropic/claude-haiku-5.5` on OpenRouter).
 - `upload_attachment`'s `contentId` is replaced by `inline`. SmarterMail rejects every content ID
   but its own, so custom IDs never worked.
 
 ### Fixed
 
+- **Security:** `get_dkim_settings` (sysadmin) returned the whole domain-settings response when it
+  could not find its DKIM section, including authentication-provider secrets such as an LDAP
+  password, which then went to the user's LLM provider. It now returns only the DKIM fields, or an
+  error. Sysadmin tool results now redact secret-like fields (password, secret, token, API key,
+  private key, credential), with the redactor shared with the domain-admin tools.
 - Agent: after a passkey sign-in, until the profile's idle timeout passes without activity, a new tab, a reload or a restarted browser on the
   same unlocked profile goes straight back into the chat. Before, it asked for the OpenRouter key
   again, which the profile already stores.

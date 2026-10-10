@@ -8,7 +8,8 @@
  *
  * Supported: fenced code, inline code, headings, bold, italic, strikethrough,
  * links (http/https/mailto only), autolinks, unordered/ordered lists,
- * blockquotes, horizontal rules, paragraphs, line breaks.
+ * blockquotes, horizontal rules, GFM pipe tables (with column alignment),
+ * paragraphs, line breaks.
  */
 
 export function escapeHtml(s) {
@@ -79,6 +80,51 @@ function inline(text) {
   return out;
 }
 
+/** Split a table row on unescaped pipes; `\|` becomes a literal pipe. */
+function splitRow(line) {
+  let t = line.trim();
+  if (t.startsWith('|')) t = t.slice(1);
+  if (t.endsWith('|') && !t.endsWith('\\|')) t = t.slice(0, -1);
+  const cells = [];
+  let cur = '';
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === '\\' && t[i + 1] === '|') { cur += '|'; i++; }
+    else if (t[i] === '|') { cells.push(cur.trim()); cur = ''; }
+    else cur += t[i];
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+const DELIM_CELL = /^:?-+:?$/;
+
+/** The alignment of each column if `line` is a complete delimiter row, else null. */
+function parseDelimiter(line) {
+  if (!line.includes('|') && !line.includes(':')) return null;
+  const cells = splitRow(line);
+  if (!cells.every((c) => DELIM_CELL.test(c))) return null;
+  if (cells.length < 2 && !line.includes('|')) return null;
+  return cells.map((c) => {
+    const l = c.startsWith(':'), r = c.endsWith(':');
+    return l && r ? 'center' : r ? 'right' : l ? 'left' : null;
+  });
+}
+
+const ALIGN_CLASS = { left: 'al-l', center: 'al-c', right: 'al-r' };
+
+function renderTable(header, aligns, rows) {
+  const n = header.length;
+  const cell = (tag, text, i) => {
+    const cls = aligns[i] ? ' class="' + ALIGN_CLASS[aligns[i]] + '"' : '';
+    return '<' + tag + cls + '>' + inline(text) + '</' + tag + '>';
+  };
+  const fit = (r) => Array.from({ length: n }, (_, i) => r[i] ?? '');
+  return '<div class="table-wrap"><table><thead><tr>' + header.map((h, i) => cell('th', h, i)).join('') +
+    '</tr></thead><tbody>' +
+    rows.map((r) => '<tr>' + fit(r).map((c, i) => cell('td', c, i)).join('') + '</tr>').join('') +
+    '</tbody></table></div>';
+}
+
 /**
  * @param {string} src raw, untrusted text
  * @returns {string} HTML that is safe to assign to innerHTML
@@ -118,7 +164,8 @@ export function renderMarkdown(src) {
 
   const fenceRe = new RegExp('^' + FENCE_MARK + '(\\d+)' + MARK_END + '$');
 
-  for (const raw of lines) {
+  for (let li = 0; li < lines.length; li++) {
+    const raw = lines[li];
     const trimmed = raw.trim();
 
     const fence = fenceRe.exec(trimmed);
@@ -144,6 +191,25 @@ export function renderMarkdown(src) {
     const bq = /^&gt;\s?(.*)$/.exec(trimmed);
     if (bq) { flushParagraph(); flushList(); quote.push(bq[1]); continue; }
     flushQuote();
+
+    // GFM table: a header row followed by a complete delimiter row. Until the
+    // delimiter has arrived (streaming) the lines fall through as plain text.
+    if (trimmed.includes('|') && li + 1 < lines.length) {
+      const aligns = parseDelimiter(lines[li + 1].trim());
+      const header = aligns ? splitRow(trimmed) : null;
+      if (aligns && header.length === aligns.length) {
+        flushAll();
+        const rows = [];
+        let j = li + 2;
+        while (j < lines.length && lines[j].trim() !== '' && lines[j].includes('|')) {
+          rows.push(splitRow(lines[j]));
+          j++;
+        }
+        html.push(renderTable(header, aligns, rows));
+        li = j - 1;
+        continue;
+      }
+    }
 
     const ul = /^[-*+]\s+(.*)$/.exec(trimmed);
     const ol = /^(\d+)[.)]\s+(.*)$/.exec(trimmed);

@@ -1,12 +1,13 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
 
 /// <summary>
-/// Plain log search. Kept apart from <see cref="LogAnalysisTools"/> (which launches the claude CLI)
+/// Windowed log search. Kept apart from <see cref="LogAnalysisTools"/> (which launches the claude CLI)
 /// so consumers such as smartermail-agent can copy this file without the analysis tools.
 /// </summary>
 [McpServerToolType]
@@ -14,7 +15,11 @@ public sealed class LogSearchTools
 {
     [McpServerTool(ReadOnly = true)]
     [Description(
-        "Search server log files by type, date range, and search term. " +
+        "Search server log files by type, date range, and search term. A busy day of a log can be megabytes, " +
+        "so the result is a WINDOW (maxChars, default 20000): narrow first with a one-day range and a specific " +
+        "search term (the server filters on it), optionally 'contains' to keep only matching lines, then page. " +
+        "The window shows the most recent part first (tail=true); the result reports totalChars, returnedChars, " +
+        "hasMore and nextOffset - call again with offset=nextOffset to read further back (tail=true) or forward (tail=false). " +
         "Available log types: smtpLog, delivery, imapLog, popLog, spamChecks, contentfilter, " +
         "administrative, generalErrors, event, ews, ewsRetrieval, activeSync, calendars, " +
         "certificates, autodiscover, imapRetrieval, popRetrieval, indexing, ldapLog, " +
@@ -24,9 +29,13 @@ public sealed class LogSearchTools
         [Description("Log type to search (e.g., 'smtpLog', 'delivery', 'spamChecks')")] string type,
         [Description("Start date for log search in yyyy-MM-dd format")] string startDate,
         [Description("End date for log search in yyyy-MM-dd format")] string endDate,
-        [Description("Search term to filter log entries (empty string returns all entries)")] string search,
+        [Description("Search term the server uses to filter log entries (empty string returns all entries - avoid for busy logs)")] string search,
         [Description("Include related log entries (useful for tracking a message through multiple log types)")] bool related,
-        UserContext userContext)
+        UserContext userContext,
+        [Description("Maximum characters to return (default 20000, capped at 100000).")] int maxChars = TextWindow.DefaultMaxChars,
+        [Description("Window offset in characters. With tail=true it counts back from the end of the log; with tail=false from the start. Use nextOffset from the previous result. Default 0.")] int offset = 0,
+        [Description("true (default): return the most recent part of the log first. false: start from the beginning.")] bool tail = true,
+        [Description("Optional extra filter: keep only lines containing this text (case-insensitive), applied before windowing. The result reports matchedLines of totalLines.")] string? contains = null)
     {
         try
         {
@@ -44,18 +53,12 @@ public sealed class LogSearchTools
                 related
             });
 
-            var content = response.TryGetProperty("result", out var resultEl) ? resultEl.GetString() ?? "" : "";
-            var isTruncated = response.TryGetProperty("isTruncated", out var truncEl) && truncEl.GetBoolean();
+            var content = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("result", out var resultEl) &&
+                          resultEl.ValueKind == JsonValueKind.String ? resultEl.GetString() ?? "" : "";
+            var isTruncated = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("isTruncated", out var truncEl) &&
+                              truncEl.ValueKind == JsonValueKind.True;
 
-            return JsonSerializer.Serialize(new
-            {
-                success = true,
-                logType = type,
-                searchTerm = search ?? "",
-                content,
-                isTruncated,
-                note = isTruncated ? "Results were truncated — try a more specific search term." : null
-            });
+            return ShapeResult(type, search, content, isTruncated, maxChars, offset, tail, contains);
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -71,5 +74,37 @@ public sealed class LogSearchTools
         {
             return JsonSerializer.Serialize(new { success = false, error = ex.Message });
         }
+    }
+
+    /// <summary>Filters then windows a log body into the tool's result JSON (offline-testable).</summary>
+    public static string ShapeResult(string type, string? search, string content, bool serverTruncated,
+        int maxChars, int offset, bool tail, string? contains)
+    {
+        var (filtered, matched, totalLines) = TextWindow.FilterLines(content, contains);
+        var w = TextWindow.Slice(filtered, maxChars, offset, tail);
+        string? note = null;
+        if (w.HasMore)
+            note = "Output is a window. Page with offset=" + w.NextOffset + (tail ? " (further back)" : "") +
+                   ", or narrow with a shorter date range, a more specific search term, or contains.";
+        if (serverTruncated)
+            note = (note is null ? "" : note + " ") + "The server truncated the log itself - use a shorter date range or a more specific search term.";
+        return JsonSerializer.Serialize(new
+        {
+            success = true,
+            logType = type,
+            searchTerm = search ?? "",
+            contains = string.IsNullOrEmpty(contains) ? null : contains,
+            matchedLines = matched,
+            totalLines,
+            totalChars = w.TotalChars,
+            offset = w.Offset,
+            returnedChars = w.ReturnedChars,
+            hasMore = w.HasMore,
+            nextOffset = w.NextOffset,
+            tail = w.Tail,
+            isTruncated = serverTruncated,
+            content = w.Text,
+            note
+        });
     }
 }

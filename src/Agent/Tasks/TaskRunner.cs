@@ -41,6 +41,8 @@ public sealed class TaskRunner(
     public async Task RunAsync(TaskRow task, string runId, string trigger, bool dryRun, CancellationToken stopping)
     {
         var started = DateTimeOffset.UtcNow;
+        // Looked up before this run's own row exists; test runs never count as "the previous run".
+        var (lastOk, latest) = tasks.PreviousRuns(task.Id, runId);
         tasks.StartRun(new TaskRunRow(runId, task.Id, task.ProfileId, started.ToUnixTimeMilliseconds(), null, "running",
             dryRun, trigger, null, 0, 0, null, null, null, false));
 
@@ -84,7 +86,10 @@ public sealed class TaskRunner(
                 var context = new TaskToolContext(accounts, runtime, gate);
                 var zone = TaskDefinition.TryParseSchedule(definition.Cron, definition.TimeZone, out _, out var z) ? z : TimeZoneInfo.Utc;
                 var prompt = TaskPrompt.Build(definition.Name, accounts, definition.AllowedWrites, definition.MaxWrites, dryRun,
-                    DateTimeOffset.UtcNow, zone);
+                    DateTimeOffset.UtcNow, zone, new TaskPrompt.History(
+                        lastOk is null ? null : DateTimeOffset.FromUnixTimeMilliseconds(lastOk.StartedAt),
+                        latest is not null && latest.Status != "ok" && (lastOk is null || latest.StartedAt > lastOk.StartedAt)
+                            ? DateTimeOffset.FromUnixTimeMilliseconds(latest.StartedAt) : null));
 
                 result = await loop.RunAsync(key, definition.Model, prompt, definition.Prompt, ToolsFor(accounts, gate.AllowedWrites),
                     async (name, arguments, ct) =>
@@ -93,7 +98,7 @@ public sealed class TaskRunner(
                         return new AgentLoop.ToolResult(ToolInvoker.Flatten(outcome.Result),
                             outcome.Status != ToolDispatcher.Status.Ok || (outcome.Result.IsError ?? false), outcome.Account, outcome.Simulated);
                     },
-                    options.TaskMaxToolRounds, timeout.Token);
+                    options.TaskMaxToolRounds, timeout.Token, sessionId: $"sma-task-run-{runId}");
 
                 (status, code) = result.Stop switch
                 {
@@ -139,8 +144,10 @@ public sealed class TaskRunner(
                 tasks.RecordOutcome(task.Id, status == "ok", status == "ok" ? "ok" : code, PauseAfterFailures);
             tasks.Prune(task.Id, options.TaskRunRetention);
 
-            logger.LogInformation("Task {Task} {Trigger}{Dry} run finished: {Status} ({Code}), {Calls} tool call(s), {Seconds}s.",
+            logger.LogInformation(
+                "Task {Task} {Trigger}{Dry} run finished: {Status} ({Code}), {Calls} tool call(s), {PromptTokens} prompt token(s), {CachedTokens} cached, {Seconds}s.",
                 task.Id, trigger, dryRun ? " test" : "", status, code, result?.ToolCalls ?? 0,
+                result?.PromptTokens ?? 0, result?.CachedTokens ?? 0,
                 (int)(DateTimeOffset.UtcNow - started).TotalSeconds);
         }
     }

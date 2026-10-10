@@ -103,3 +103,56 @@ test('prettyJson formats JSON and passes other text through', () => {
   assert.equal(prettyJson('not json'), 'not json');
   assert.equal(prettyJson('{broken'), '{broken');
 });
+
+test('table: header, delimiter, body rows', () => {
+  const html = renderMarkdown('| From | Subject |\n|---|---|\n| Ann | Hello |\n| Bob | Bye |');
+  assert.ok(html.includes('<div class="table-wrap"><table><thead><tr><th>From</th><th>Subject</th></tr></thead>'));
+  assert.equal((html.match(/<tr>/g) || []).length, 3);
+  assert.ok(html.includes('<td>Ann</td><td>Hello</td>'));
+});
+
+test('table: alignment from the delimiter row, without outer pipes', () => {
+  const html = renderMarkdown('a | b | c | d\n:--- | :---: | ---: | ---\n1 | 2 | 3 | 4');
+  assert.ok(html.includes('<th class="al-l">a</th><th class="al-c">b</th><th class="al-r">c</th><th>d</th>'));
+  assert.ok(html.includes('<td class="al-r">3</td><td>4</td>'));
+});
+
+test('table: escaped pipe stays inside the cell', () => {
+  const html = renderMarkdown('| a | b |\n|---|---|\n| x \\| y | z |');
+  assert.ok(html.includes('<td>x | y</td><td>z</td>'));
+});
+
+test('table: inline markdown in cells', () => {
+  const html = renderMarkdown('| a | b |\n|---|---|\n| `code` | **bold** |');
+  assert.ok(html.includes('<td><code>code</code></td><td><strong>bold</strong></td>'));
+});
+
+test('table: HTML in cells stays escaped', () => {
+  const html = renderMarkdown('| <img src=x onerror=alert(1)> | b |\n|---|---|\n| <script>x</script> | [l](javascript:alert(1)) |');
+  assert.ok(!html.includes('<img') && !html.includes('<script'));
+  assert.ok(html.includes('&lt;img'));
+  assert.ok(!html.includes('href'));
+  const tags = new Set([...html.matchAll(/<\/?([a-z0-9]+)/gi)].map((m) => m[1].toLowerCase()));
+  assert.deepEqual([...tags].sort(), ['div', 'table', 'tbody', 'td', 'th', 'thead', 'tr']);
+});
+
+test('table: ragged rows are padded/truncated; ends at blank line', () => {
+  const html = renderMarkdown('| a | b |\n|---|---|\n| 1 |\n| 1 | 2 | 3 |\n\nafter');
+  assert.ok(html.includes('<td>1</td><td></td>'));
+  assert.ok(!html.includes('>3<'));
+  assert.ok(html.includes('<p>after</p>'));
+});
+
+test('table: partial tables while streaming render as text and never throw', () => {
+  for (const src of ['| a | b |', '| a | b |\n', '| a | b |\n|', '| a | b |\n|--', '| a | b |\n|---|']) {
+    const html = renderMarkdown(src);
+    assert.ok(!html.includes('<table'), src);
+  }
+  assert.ok(renderMarkdown('| a | b |\n|---|---|').includes('<table'));
+});
+
+test('a pipe in ordinary prose is not a table', () => {
+  const html = renderMarkdown('use a | b to pipe\nnext line --- here');
+  assert.ok(!html.includes('<table'));
+  assert.ok(html.startsWith('<p>'));
+});

@@ -273,7 +273,7 @@ Served by **smartermail-mcp-admin** and by the agent for system-admin accounts.
 | `delete_dkim_rollover_key` | write, destructive | Delete a pending DKIM rollover key |
 | `disable_dkim` | write, destructive | Disable DKIM signing for a domain |
 | `enable_dkim` | write | Enable DKIM signing for a domain |
-| `get_dkim_settings` | read | Get DKIM settings for a domain |
+| `get_dkim_settings` | read | Get a domain's DKIM settings: selector, public key (for the DNS record), key size, pending rollover, active state, canonicalization and signed header fields. Nothing else from the domain settings is returned. |
 | `set_dkim_settings` | write | Update DKIM settings for a domain (canonicalization, header fields, max sign size) |
 
 ### Domain
@@ -292,7 +292,7 @@ Served by **smartermail-mcp-admin** and by the agent for system-admin accounts.
 
 | Tool | Kind | Description |
 |---|---|---|
-| `search_log_files` | read | Search server log files by type, date range, and search term. Available log types: smtpLog, delivery, imapLog, popLog, spamChecks, contentfilter, administrative, generalErrors, event, ews, ewsRetrieval, activeSync, calendars, certificates, autodiscover, imapRetrieval, popRetrieval, indexing, ldapLog, activation, mailinglists, maintenance, mapi, messageId, oab, routingRules, conversion, autoCleanFolders, webdav, xmppLog |
+| `search_log_files` | read | Search server log files by type, date range, and search term. A busy day of a log can be megabytes, so the result is a WINDOW (maxChars, default 20000): narrow first with a one-day range and a specific search term (the server filters on it), optionally 'contains' to keep only matching lines, then page. The window shows the most recent part first (tail=true); the result reports totalChars, returnedChars, hasMore and nextOffset - call again with offset=nextOffset to read further back (tail=true) or forward (tail=false). Available log types: smtpLog, delivery, imapLog, popLog, spamChecks, contentfilter, administrative, generalErrors, event, ews, ewsRetrieval, activeSync, calendars, certificates, autodiscover, imapRetrieval, popRetrieval, indexing, ldapLog, activation, mailinglists, maintenance, mapi, messageId, oab, routingRules, conversion, autoCleanFolders, webdav, xmppLog |
 
 ### Monitoring
 

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmarterMailMcp.Core;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailMcp.SystemAdmin.Tools;
@@ -17,7 +18,7 @@ public sealed class MonitoringTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/throttled-users");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -36,7 +37,7 @@ public sealed class MonitoringTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/throttled-domains");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -55,7 +56,7 @@ public sealed class MonitoringTools
         try
         {
             var response = await userContext.GetAsync<JsonElement>("/api/v1/settings/sysadmin/throttled-counts");
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -79,7 +80,7 @@ public sealed class MonitoringTools
             {
                 input = new List<string> { email }
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -103,7 +104,7 @@ public sealed class MonitoringTools
             {
                 input = new List<string> { domain }
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -134,7 +135,7 @@ public sealed class MonitoringTools
                 startindex = 0,
                 count = count > 0 ? count : 100
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -156,7 +157,7 @@ public sealed class MonitoringTools
             {
                 serviceTypes = new[] { 0, 1, 2, 4, 7, 8, 9, 10, 12 }
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -181,7 +182,7 @@ public sealed class MonitoringTools
                 email = username,
                 dropInfo = new List<string> { username }
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -203,7 +204,7 @@ public sealed class MonitoringTools
         {
             var response = await userContext.PostAsync<JsonElement>(
                 $"/api/v1/settings/sysadmin/drop-ip-connections/{Uri.EscapeDataString(ip)}", new { });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
@@ -227,7 +228,7 @@ public sealed class MonitoringTools
             {
                 sessions = new[] { new { email = username, ip = "" } }
             });
-            return JsonSerializer.Serialize(response);
+            return JsonSerializer.Serialize(SecretRedactor.Redact(response));
         }
         catch (SmarterMailApiException apiEx)
         {
