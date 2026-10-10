@@ -4,6 +4,7 @@ using Cronos;
 using SmarterMailAgent.Auth;
 using SmarterMailAgent.Mcp;
 using SmarterMailAgent.Profiles;
+using SmarterMailAgent.Tasks.Triggers;
 
 namespace SmarterMailAgent.Tasks;
 
@@ -15,6 +16,7 @@ namespace SmarterMailAgent.Tasks;
 /// <param name="AllowedWrites">The only write tools the run may call, by name. Empty = a read-only task.</param>
 /// <param name="EmailAccountId">Mail the result to this account's own address (one of <paramref name="AccountIds"/>, read-write, with a mailbox).</param>
 /// <param name="Approvals">Which allowed writes are proposed for approval instead of run (null on older tasks: none).</param>
+/// <param name="Trigger">Set for a condition task (then <paramref name="Cron"/> is empty and ignored); null = scheduled by cron.</param>
 public sealed record TaskDefinition(
     int Version,
     string Name,
@@ -26,7 +28,8 @@ public sealed record TaskDefinition(
     int MaxWrites,
     string Model,
     string? EmailAccountId,
-    global::SmarterMailAgent.Tasks.Approvals.TaskApprovals? Approvals = null)
+    global::SmarterMailAgent.Tasks.Approvals.TaskApprovals? Approvals = null,
+    TaskTrigger? Trigger = null)
 {
     public const int MaxName = 80;
     public const int MaxPrompt = 4000;
@@ -121,19 +124,23 @@ public sealed record TaskDefinition(
     /// accounts' roles never see.
     /// </summary>
     public IReadOnlyList<string> Validate(
-        IReadOnlyDictionary<string, ProfileRuntime.RowInfo> delegatedRows, ToolCatalog catalog, TimeSpan minInterval)
+        IReadOnlyDictionary<string, ProfileRuntime.RowInfo> delegatedRows, ToolCatalog catalog, TimeSpan minInterval,
+        TriggerOptions? triggerOptions = null)
     {
         var errors = new List<string>();
+        var alertOnly = Trigger?.IsAlert == true;   // an alert runs no model: no prompt or model needed
         if (string.IsNullOrWhiteSpace(Name) || Name.Length > MaxName)
             errors.Add($"Give the task a name (at most {MaxName} characters).");
-        if (string.IsNullOrWhiteSpace(Prompt) || Prompt.Length > MaxPrompt)
+        if ((!alertOnly && string.IsNullOrWhiteSpace(Prompt)) || (Prompt?.Length ?? 0) > MaxPrompt)
             errors.Add($"Describe what the task should do (at most {MaxPrompt} characters).");
-        if (string.IsNullOrWhiteSpace(Model) || Model.Length > 200)
+        if ((!alertOnly && string.IsNullOrWhiteSpace(Model)) || (Model?.Length ?? 0) > 200)
             errors.Add("Choose a model.");
         if (MaxWrites is < 0 or > MaxWritesLimit)
             errors.Add($"The change limit must be between 0 and {MaxWritesLimit}.");
 
-        if (!TryParseSchedule(Cron, TimeZone, out var expression, out var zone))
+        if (Trigger is not null)
+            errors.AddRange(Trigger.Validate(this, delegatedRows, catalog, triggerOptions ?? TriggerOptions.Default));
+        else if (!TryParseSchedule(Cron, TimeZone, out var expression, out var zone))
             errors.Add("The schedule is not a valid five-field cron expression in a known time zone.");
         else if (ShortestInterval(expression, zone, DateTimeOffset.UtcNow) < minInterval)
             errors.Add($"Runs must be at least {(int)minInterval.TotalMinutes} minutes apart.");

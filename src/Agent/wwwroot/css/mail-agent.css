@@ -665,3 +665,31 @@ dialog.code-modal { width: min(520px, calc(100vw - 24px)); }
 .run-step.simulated { border-style: dashed; }
 .run-step-head { font-family: var(--mono); font-size: .8rem; color: var(--text-dim); margin-bottom: 6px; }
 .run-step pre { white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; font-size: .78rem; }
+
+/* condition-triggered tasks (triggers.js) */
+.trigger-editor { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
+.trigger-editor[hidden] { display: none; }
+.trigger-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.trigger-inline select, .trigger-inline input { width: auto; flex: 0 1 auto; }
+.trigger-inline input[type=number] { width: 5.5em; }
+.trigger-text { font-size: .85rem; color: var(--text-dim); }
+.trigger-labelled { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; }
+.trigger-args { display: grid; gap: 6px; margin-top: 8px; }
+.trigger-arg { display: grid; grid-template-columns: minmax(7em, auto) 1fr; align-items: center; gap: 8px; }
+.trigger-arg-name { font-family: var(--mono); font-size: .8rem; color: var(--text-dim); }
+.trigger-arg input[type=checkbox] { width: 16px; height: 16px; justify-self: start; }
+.trigger-rows { display: grid; gap: 6px; margin: 8px 0; }
+.trigger-row { display: grid; grid-template-columns: 2fr 1.3fr 1.3fr auto; gap: 6px; align-items: center; }
+.trigger-path { font-family: var(--mono); font-size: .82rem; }
+.trigger-json { width: 100%; font-family: var(--mono); font-size: .8rem; margin-bottom: 6px; }
+.trigger-test { margin-top: 8px; }
+.trigger-raw { white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; font-size: .78rem; }
+.hint.ok { color: var(--green); }
+.json-tree { margin-top: 6px; max-height: 320px; overflow: auto; font-family: var(--mono); font-size: .78rem;
+  padding: 6px 8px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
+.json-tree summary { cursor: pointer; color: var(--text-dim); }
+.json-children { padding-left: 14px; }
+.json-pick { all: unset; cursor: pointer; display: block; padding: 1px 4px; border-radius: 4px; word-break: break-all; }
+.json-pick:hover, .json-pick:focus-visible { background: var(--accent-soft); }
+.json-key { color: var(--text-dim); }
+.json-value { color: var(--teal); }

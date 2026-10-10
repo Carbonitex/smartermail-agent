@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using SmarterMailAgent.Profiles;
 using SmarterMailAgent.Server;
 using SmarterMailAgent.Storage;
+using SmarterMailAgent.Tasks.Triggers;
 
 namespace SmarterMailAgent.Tasks;
 
@@ -82,7 +83,20 @@ public sealed class TaskRunScheduler(
         return Start(task, runId, "manual", dryRun);
     }
 
-    private bool Start(TaskRow task, string runId, string trigger, bool dryRun)
+    /// <summary>
+    /// A condition task's run (<c>condition</c> from the prober, <c>manual</c> for its "Run now"), with
+    /// the probe's evidence as the seed. False when that task is already running: the fire was not accepted.
+    /// </summary>
+    public bool StartTriggered(TaskRow task, string trigger, bool dryRun, TriggerSeed seed, out string runId)
+    {
+        runId = ProfileCrypto.NewId();
+        return Start(task, runId, trigger, dryRun, seed);
+    }
+
+    /// <summary>Whether a run of this task is in flight.</summary>
+    public bool IsRunning(string taskId) => _running.ContainsKey(taskId);
+
+    private bool Start(TaskRow task, string runId, string trigger, bool dryRun, TriggerSeed? seed = null)
     {
         var gate = new TaskCompletionSource();
         if (!_running.TryAdd(task.Id, gate.Task))
@@ -95,7 +109,7 @@ public sealed class TaskRunScheduler(
             {
                 await _slots.WaitAsync(_stopping);
                 slot = true;
-                await runner.RunAsync(task, runId, trigger, dryRun, _stopping);
+                await runner.RunAsync(task, runId, trigger, dryRun, _stopping, seed);
             }
             catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
             {

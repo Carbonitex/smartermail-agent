@@ -28,7 +28,17 @@ public sealed class AgentLoop(OpenRouterClient llm, ILogger<AgentLoop>? logger =
     /// <param name="ProposalId">The call was queued for approval as this proposal.</param>
     public sealed record Step(
         string Kind, string? Content = null, string? Tool = null, string? Arguments = null, string? Account = null,
-        bool IsError = false, bool Simulated = false, string? ProposalId = null);
+        bool IsError = false, bool Simulated = false, string? ProposalId = null)
+    {
+        /// <summary>The trigger's probe, handed in as the run's first tool result (not a call the model made).</summary>
+        public bool Seed { get; init; }
+    }
+
+    /// <summary>
+    /// A tool result to start the run with (a condition trigger's evidence): sent as a synthetic
+    /// assistant call of <paramref name="Tool"/> and its tool message, never as prompt text.
+    /// </summary>
+    public sealed record Seed(string Tool, string Arguments, string Content, string? Account);
 
     /// <param name="Stop"><c>completed</c>, <c>max_rounds</c>, <c>length</c>, <c>content_filter</c>, <c>cancelled</c> or <c>error</c>.</param>
     /// <param name="CachedTokens">Of <paramref name="PromptTokens"/>, how many were read from the provider's prompt cache.</param>
@@ -40,7 +50,7 @@ public sealed class AgentLoop(OpenRouterClient llm, ILogger<AgentLoop>? logger =
     public async Task<Result> RunAsync(
         string apiKey, string model, string systemPrompt, string userPrompt, JsonArray tools,
         Func<string, IReadOnlyDictionary<string, JsonElement>?, CancellationToken, Task<ToolResult>> callTool,
-        int maxRounds, CancellationToken ct, string? sessionId = null, ArtifactAnalysis? analysis = null)
+        int maxRounds, CancellationToken ct, string? sessionId = null, ArtifactAnalysis? analysis = null, Seed? seed = null)
     {
         // Artifacts: the analysis lines and analyze_result are fixed for the whole run (appended once, after the
         // catalog's tools), so every round still sends a byte-identical prefix.
@@ -63,6 +73,8 @@ public sealed class AgentLoop(OpenRouterClient llm, ILogger<AgentLoop>? logger =
             new JsonObject { ["role"] = "user", ["content"] = userPrompt },
         };
         var steps = new List<Step>();
+        if (seed is not null)
+            AddSeed(messages, steps, seed);
         long promptTokens = 0, completionTokens = 0, cachedTokens = 0, cacheWriteTokens = 0;
         double cost = 0;
         var toolCalls = 0;
@@ -217,6 +229,24 @@ public sealed class AgentLoop(OpenRouterClient llm, ILogger<AgentLoop>? logger =
             artifact.Chars, artifact.Tool, outcome.Mode, outcome.Stop, outcome.Rounds, outcome.Steps.Count, outcome.PromptTokens,
             clock.ElapsedMilliseconds);
         return outcome;
+    }
+
+    private static void AddSeed(JsonArray messages, List<Step> steps, Seed seed)
+    {
+        const string id = "call_seed_0";
+        messages.Add(new JsonObject
+        {
+            ["role"] = "assistant",
+            ["content"] = "",
+            ["tool_calls"] = new JsonArray(new JsonObject
+            {
+                ["id"] = id,
+                ["type"] = "function",
+                ["function"] = new JsonObject { ["name"] = seed.Tool, ["arguments"] = seed.Arguments },
+            }),
+        });
+        messages.Add(ToolMessage(id, Clamp(seed.Content)));
+        steps.Add(new Step("tool", Clamp(seed.Content, 4000), seed.Tool, Clamp(seed.Arguments, 4000), seed.Account) { Seed = true });
     }
 
     private static JsonObject ToolMessage(string id, string content) =>

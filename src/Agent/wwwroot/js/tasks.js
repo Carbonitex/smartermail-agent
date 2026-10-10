@@ -14,6 +14,7 @@ import { loadView, currentView } from './profile-ui.js';
 import { renderMarkdown, prettyJson } from './markdown.js';
 import { categoryOf } from './llm.js';
 import { renderApprovals, modeSelect, approvalFields } from './approvals.js';
+import { buildTriggerEditor, describeTrigger } from './triggers.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -122,7 +123,7 @@ function taskCard(t, view) {
   card.append(head);
 
   if (d) {
-    card.append(para(`${describeCron(d.cron)} (${d.timeZone})` +
+    card.append(para(d.trigger ? `${describeTrigger(d.trigger, t.trigger)} (${d.timeZone})` : `${describeCron(d.cron)} (${d.timeZone})` +
       (t.nextRunAt && t.enabled ? ` · next ${new Date(t.nextRunAt).toLocaleString()}` : '') +
       (t.lastRunAt ? ` · last ${new Date(t.lastRunAt).toLocaleString()}` : '')));
     const names = d.accountIds.map((id) => view?.accounts.find((a) => a.id === id)?.login || 'removed account');
@@ -177,21 +178,34 @@ function renderEditor(task) {
 
   // Schedule
   const schedule = parseCron(d?.cron || '0 7 * * 1-5');
+  const triggers = profile.taskLimits().triggers;
   const preset = select([
-    ['weekdays', 'Every weekday at'], ['daily', 'Every day at'], ['weekly', 'Every week on'], ['hours', 'Every few hours'], ['custom', 'Custom (cron)']
-  ], schedule.kind);
+    ['weekdays', 'Every weekday at'], ['daily', 'Every day at'], ['weekly', 'Every week on'], ['hours', 'Every few hours'], ['custom', 'Custom (cron)'],
+    ...(triggers?.enabled || d?.trigger ? [['condition', 'When something happens']] : [])
+  ], d?.trigger ? 'condition' : schedule.kind);
   const time = input('time', schedule.time || '07:00');
   const day = select(DAYS.map((n, i) => [String(i), n]), String(schedule.day ?? 1));
   const hours = select(EVERY_HOURS.map((n) => [String(n), n === 1 ? 'every hour' : `every ${n} hours`]), String(schedule.hours || 4));
   const cron = input('text', d?.cron || '', '0 7 * * 1-5');
   const zone = input('text', d?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const scheduleRow = div('task-schedule');
+  let promptField = null;
+  const trigger = buildTriggerEditor({
+    trigger: d?.trigger || null,
+    accounts: (view?.accounts || []).filter((a) => a.delegated),
+    tools: hooks.getToolList(),
+    minInterval: triggers?.minIntervalMinutes,
+    probe: (body) => api.probeTask(body),
+    onAction: () => syncSchedule()
+  });
   const syncSchedule = () => {
     const k = preset.value;
     time.hidden = !['weekdays', 'daily', 'weekly'].includes(k);
     day.hidden = k !== 'weekly';
     hours.hidden = k !== 'hours';
     cron.hidden = k !== 'custom';
+    trigger.element.hidden = k !== 'condition';
+    if (promptField) promptField.hidden = k === 'condition' && trigger.action() === 'alert';
   };
   preset.addEventListener('change', syncSchedule);
   scheduleRow.append(preset, day, time, hours, cron);
@@ -266,10 +280,14 @@ function renderEditor(task) {
   const error = para('', 'error');
   error.hidden = true;
 
+  const whenBox = div('task-when');
+  whenBox.append(scheduleRow, trigger.element);
+  promptField = field('What should it do?', promptInput, 'Write it as you would ask in the chat. Nobody is there to answer questions while it runs.');
+  syncSchedule();
   form.append(
     field('Name', nameInput),
-    field('What should it do?', promptInput, 'Write it as you would ask in the chat. Nobody is there to answer questions while it runs.'),
-    field('When', scheduleRow),
+    promptField,
+    field('When', whenBox),
     field('Time zone', zone),
     field('Accounts', accountList),
     field('Changes it may make', writes,
@@ -295,12 +313,19 @@ function renderEditor(task) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     error.hidden = true;
+    let when = null;
+    if (preset.value === 'condition') {
+      try { when = trigger.value(); } catch (err) { error.textContent = err.message; error.hidden = false; return; }
+    }
+    const chosenIds = accounts.filter((a, i) => accountBoxes[i].input.checked).map((a) => a.id);
+    if (when && !chosenIds.includes(when.probe.accountId)) chosenIds.push(when.probe.accountId);   // the checked account is one of the task's
     const body = {
       name: nameInput.value.trim(),
       prompt: promptInput.value.trim(),
-      cron: buildCron(preset.value, { time: time.value, day: day.value, hours: hours.value, cron: cron.value }),
+      cron: when ? '' : buildCron(preset.value, { time: time.value, day: day.value, hours: hours.value, cron: cron.value }),
+      trigger: when,
       timeZone: zone.value.trim(),
-      accountIds: accounts.filter((a, i) => accountBoxes[i].input.checked).map((a) => a.id),
+      accountIds: chosenIds,
       allowedWrites: [...writeBoxes].filter(([, c]) => c.input.checked).map(([n]) => n),
       approvals: {
         writes: [...writeBoxes].filter(([, c]) => c.input.checked && c.mode.value === 'approve').map(([n]) => n),
@@ -363,7 +388,7 @@ async function renderRuns(task, { watch = false } = {}) {
       const row = div('run-row' + (r.read ? '' : ' unread'));
       const text = document.createElement('span');
       text.textContent = `${new Date(r.startedAt).toLocaleString()} · ${task ? '' : names.get(r.taskId) + ' · '}` +
-        `${r.trigger === 'schedule' ? 'scheduled' : 'manual'}${r.dryRun ? ', test' : ''} · ` +
+        `${r.trigger === 'schedule' ? 'scheduled' : r.trigger === 'condition' ? 'condition' : 'manual'}${r.dryRun ? ', test' : ''} · ` +
         `${r.status === 'running' ? 'running…' : r.status}${r.errorCode && r.status !== 'running' ? ` (${r.errorMessage || r.errorCode})` : ''}` +
         (r.status !== 'running' ? ` · ${r.toolCalls} tool call${r.toolCalls === 1 ? '' : 's'}, ${r.writes} change${r.writes === 1 ? '' : 's'}` +
           (formatTokens(r) ? ` · ${formatTokens(r)}` : '') : '');

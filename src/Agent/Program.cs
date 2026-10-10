@@ -12,6 +12,7 @@ using SmarterMailAgent.Server;
 using SmarterMailAgent.Storage;
 using SmarterMailAgent.Tasks;
 using SmarterMailAgent.Tasks.Approvals;
+using SmarterMailAgent.Tasks.Triggers;
 using SmarterMailAgent.Web;
 using SmarterMailMcp.Core.Models;
 
@@ -38,6 +39,8 @@ builder.Services.AddHostedService<SessionSweeper>();
 // BROWSER_ONLY_MODE=true registers none of it, so nothing is ever written to DATA_DIR.
 var serverOptions = ServerOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(serverOptions);
+var triggerOptions = TriggerOptions.FromConfiguration(builder.Configuration, serverOptions);
+builder.Services.AddSingleton(triggerOptions);
 if (serverOptions.ServerMode)
 {
     builder.Services.AddSingleton<DataStore>();
@@ -53,6 +56,9 @@ if (serverOptions.ServerMode)
         builder.Services.AddSingleton<TaskRunner>();
         builder.Services.AddTaskRunScheduler();
         builder.Services.AddApprovals();
+        builder.Services.AddSingleton<TriggerStore>();
+        if (triggerOptions.Enabled)
+            builder.Services.AddTriggerProber();
     }
 }
 builder.Services.AddHttpContextAccessor();

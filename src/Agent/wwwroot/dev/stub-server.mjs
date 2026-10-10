@@ -122,6 +122,24 @@ const TOOLS = [
     }
   },
   {
+    name: 'get_spool_message_counts',
+    description: 'Count the messages in the spool by state (waiting, sending, held…).',
+    scope: 'SysAdmin', category: 'Spool', write: false,
+    inputSchema: { type: 'object', properties: {}, required: [] }
+  },
+  {
+    name: 'get_ssl_certificates',
+    description: 'List the SSL certificates on the server with their expiration dates.',
+    scope: 'SysAdmin', category: 'Certificates', write: false,
+    inputSchema: { type: 'object', properties: {}, required: [] }
+  },
+  {
+    name: 'get_throttled_users',
+    description: 'List the users currently being throttled.',
+    scope: 'SysAdmin', category: 'Monitoring', write: false,
+    inputSchema: { type: 'object', properties: {}, required: [] }
+  },
+  {
     name: 'delete_domain',
     description: 'Delete a domain and all of its data from the server. WRITE TOOL.',
     scope: 'SysAdmin', category: 'Domains', write: true, destructive: true,
@@ -159,6 +177,8 @@ const CANNED_EMAILS = [
   { id: '4818', from: 'news@fabrikam.example', fromName: 'Fabrikam Updates', subject: 'Release notes: version 9.2', date: '2026-09-10T16:00:00Z', isRead: true, size: 9902, preview: 'This release fixes 14 issues including folder sync…' },
   { id: '4817', from: 'security@contoso.com', fromName: 'Contoso Security', subject: 'Unusual sign-in blocked', date: '2026-09-10T11:26:00Z', isRead: false, size: 3300, preview: 'We blocked a sign-in attempt from an unrecognised device.' }
 ];
+
+let spoolWaiting = 420;
 
 function runTool(name, args, session) {
   const domain = session.domain || String(session.emailAddress || '').split('@')[1] || 'example.com';
@@ -222,6 +242,26 @@ function runTool(name, args, session) {
       const content = lines.join('\r\n') + '\r\n';
       return { isError: false, content: JSON.stringify({ success: true, logType: args.type || 'smtpLog', totalChars: content.length, hasMore: false, content }) };
     }
+    case 'get_spool_message_counts': {
+      // Drifts upward a little on every call, so a "> N" condition can be watched turning true.
+      spoolWaiting += 37;
+      return { isError: false, content: JSON.stringify({ success: true, waiting: spoolWaiting, sending: 3, held: 1, quarantined: 0 }, null, 2) };
+    }
+    case 'get_ssl_certificates': {
+      const inDays = (d) => new Date(Date.now() + d * 86400000).toISOString();
+      return {
+        isError: false,
+        content: JSON.stringify({
+          success: true,
+          certificates: [
+            { name: 'mail.example.com', issuer: "Let's Encrypt", expiration: inDays(9) },
+            { name: 'webmail.contoso.com', issuer: 'Contoso CA', expiration: inDays(240) }
+          ]
+        }, null, 2)
+      };
+    }
+    case 'get_throttled_users':
+      return { isError: false, content: JSON.stringify({ success: true, users: [{ user: 'jen@example.com', reason: 'Outgoing messages per hour', throttledUntil: new Date(Date.now() + 3600000).toISOString() }] }, null, 2) };
     case 'delete_domain':
       return { isError: false, content: JSON.stringify({ success: true, deleted: args.domain }) };
     case 'enable_dkim':
@@ -631,7 +671,7 @@ async function handleApi(req, res, p, url) {
   if (p === '/config' && method === 'GET') return json(res, 200, serverConfig(RESUME_ENABLED, RESUME_DAYS));
 
   if (await handleProfiles({
-    req, res, p, method, readBody, json, sessionOf, sessions, publicSession, sessionCookie, clearCookie,
+    req, res, p, method, readBody, json, sessionOf, sessions, publicSession, sessionCookie, clearCookie, runTool, tools: TOOLS,
     newSessionId: () => crypto.randomBytes(32).toString('base64url'),
     host: String(req.headers.host || 'localhost').replace(/:\d+$/, '')
   })) return;
