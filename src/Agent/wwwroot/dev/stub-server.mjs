@@ -124,7 +124,7 @@ const TOOLS = [
   {
     name: 'delete_domain',
     description: 'Delete a domain and all of its data from the server. WRITE TOOL.',
-    scope: 'SysAdmin', category: 'Domains', write: true,
+    scope: 'SysAdmin', category: 'Domains', write: true, destructive: true,
     inputSchema: {
       type: 'object',
       properties: { domain: { type: 'string', description: 'Domain name, e.g. example.com' } },
@@ -375,7 +375,7 @@ function toolList(s) {
       };
       if (eligible.length > 1) inputSchema.required = [...new Set([...(inputSchema.required || []), 'account'])];
     }
-    out.push({ name: t.name, description: t.description, inputSchema, category: t.category, scope: t.scope, write: t.write });
+    out.push({ name: t.name, description: t.description, inputSchema, category: t.category, scope: t.scope, write: t.write, destructive: !!t.destructive });
   }
   return out;
 }

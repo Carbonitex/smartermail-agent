@@ -85,6 +85,12 @@ public sealed record ServerOptions
     /// </summary>
     public string? TaskAnalysisModel { get; init; } = DefaultAnalysisModel;
 
+    /// <summary><c>APPROVAL_MAX_PENDING</c>: pending proposals one profile may hold; a run past it is told the queue is full.</summary>
+    public int ApprovalMaxPending { get; init; } = 100;
+
+    /// <summary><c>TASK_MAX_PROPOSALS</c>: the highest per-run proposal limit a task may set.</summary>
+    public int TaskMaxProposals { get; init; } = 50;
+
     /// <summary>OpenRouter's chat-completions endpoint by default; tests point it at a fake.</summary>
     public Uri LlmBaseUrl { get; init; } = new("https://openrouter.ai/api/v1/");
 
@@ -146,6 +152,8 @@ public sealed record ServerOptions
             TaskMinInterval = TimeSpan.FromMinutes(Int(config, "TASK_MIN_INTERVAL_MINUTES", 15)),
             TasksPerProfile = Int(config, "TASKS_PER_PROFILE", 10),
             TaskRunRetention = Int(config, "TASK_RUN_RETENTION", 50),
+            ApprovalMaxPending = Int(config, "APPROVAL_MAX_PENDING", 100),
+            TaskMaxProposals = Int(config, "TASK_MAX_PROPOSALS", 50),
             LlmBaseUrl = llm,
             AnalysisModel = analysisModel,
             TaskAnalysisModel = taskAnalysisModel,

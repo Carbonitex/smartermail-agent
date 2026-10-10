@@ -1,0 +1,60 @@
+/* ---------------------------------------------------------- approvals
+ * The "To approve" view of the Tasks dialog (js/approvals.js) and the
+ * editor's per-tool approval mode. Uses the variables of mail-agent.css.
+ */
+
+.approval-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.approval-banner .task-hint { margin-top: 0; }
+
+.approval-run { margin-top: 14px; }
+.approval-run-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  font-size: .85rem; color: var(--text-dim);
+}
+.approval-run-head > span { flex: 1 1 auto; }
+
+.approval-card {
+  margin-top: 8px; padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+}
+.approval-card.destructive { border-color: oklch(55% 0.20 25 / 0.55); }
+.approval-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.approval-tool { font-family: var(--mono); font-size: .9rem; color: var(--text); }
+.approval-expiry { margin-left: auto; font-size: .75rem; color: var(--text-faint); }
+.task-badge.danger { color: var(--red); border-color: oklch(55% 0.20 25 / 0.55); }
+.task-badge.info { color: var(--teal); border-color: oklch(55% 0.12 175 / 0.5); }
+.approval-who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: .85rem; }
+
+.approval-args { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: .82rem; }
+.approval-args td { padding: 5px 6px; vertical-align: top; border-top: 1px solid var(--border-soft); }
+.approval-arg-key { width: 1%; white-space: nowrap; font-family: var(--mono); color: var(--text-dim); }
+.approval-arg-value { font-family: var(--mono); white-space: pre-wrap; word-break: break-word; }
+pre.approval-arg-value { margin: 0; max-height: 220px; overflow: auto; }
+.approval-arg-value.address { color: var(--amber); font-weight: 600; }
+.approval-arg-value.empty { color: var(--text-faint); font-style: italic; }
+
+.approval-raw { margin-top: 8px; font-size: .8rem; }
+.approval-raw summary { cursor: pointer; color: var(--text-dim); }
+.approval-raw pre { white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; font-size: .78rem; }
+
+.approval-note {
+  margin-top: 10px; padding: 8px 10px; border-left: 3px solid var(--amber);
+  background: oklch(80% 0.16 85 / 0.06); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.approval-note-label { font-size: .75rem; color: var(--amber); }
+.approval-note-text { margin-top: 4px; font-size: .85rem; white-space: pre-wrap; word-break: break-word; }
+
+.approval-outcome { margin-top: 10px; font-size: .85rem; }
+.approval-outcome.ok > p { color: var(--green); }
+.approval-outcome.warn > p { color: var(--amber); }
+.approval-outcome.error > p { color: var(--red); }
+.approval-outcome pre { white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; font-size: .78rem; }
+
+.approval-history { margin-top: 16px; font-size: .85rem; }
+.approval-history > summary { cursor: pointer; color: var(--text-dim); }
+.approval-decided { padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
+.approval-decided pre { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; font-size: .76rem; }
+
+.approval-write-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.approval-write-row .approval-mode { width: auto; flex: 0 0 auto; font-size: .78rem; padding: 2px 6px; }
+.run-step.proposed { border-color: oklch(70% 0.15 85 / 0.5); }

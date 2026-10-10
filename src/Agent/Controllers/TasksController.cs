@@ -6,6 +6,7 @@ using SmarterMailAgent.Profiles;
 using SmarterMailAgent.Server;
 using SmarterMailAgent.Storage;
 using SmarterMailAgent.Tasks;
+using SmarterMailAgent.Tasks.Approvals;
 
 namespace SmarterMailAgent.Controllers;
 
@@ -28,7 +29,8 @@ public sealed class TasksController(
 {
     public sealed record TaskRequest(
         string? Name, string? Prompt, string? Cron, string? TimeZone, IReadOnlyList<string>? AccountIds,
-        IReadOnlyList<string>? AllowedWrites, int? MaxWrites, string? Model, string? EmailAccountId, bool Enabled = true);
+        IReadOnlyList<string>? AllowedWrites, int? MaxWrites, string? Model, string? EmailAccountId, bool Enabled = true,
+        TaskApprovals? Approvals = null);
 
     public sealed record RunRequest(bool DryRun);
 
@@ -48,7 +50,7 @@ public sealed class TasksController(
             return refusal;
 
         var list = tasks.ForProfile(profileId).Select(t => View(t, sealer)).ToList();
-        return Ok(new { tasks = list, unread = tasks.UnreadCount(profileId) });
+        return Ok(new { tasks = list, unread = tasks.UnreadCount(profileId), pending = services.GetRequiredService<ProposalStore>().PendingCount(profileId) });
     }
 
     [HttpPost]
@@ -168,7 +170,8 @@ public sealed class TasksController(
         (r.AllowedWrites ?? []).Distinct(StringComparer.Ordinal).ToList(),
         r.MaxWrites ?? 5,
         r.Model?.Trim() ?? "",
-        string.IsNullOrWhiteSpace(r.EmailAccountId) ? null : r.EmailAccountId);
+        string.IsNullOrWhiteSpace(r.EmailAccountId) ? null : r.EmailAccountId,
+        TaskApprovals.Normalize(r.Approvals));
 
     /// <summary>Validated against the profile's delegated accounts, as this session's profile knows them.</summary>
     private IActionResult? Invalid(TaskDefinition definition)
@@ -180,7 +183,8 @@ public sealed class TasksController(
         var delegated = runtime.Rows
             .Where(r => r.Seal == ProfileStore.SealServer)
             .ToDictionary(r => r.Id, StringComparer.Ordinal);
-        var errors = definition.Validate(delegated, catalog, options.TaskMinInterval);
+        var errors = definition.Validate(delegated, catalog, options.TaskMinInterval)
+            .Concat(definition.Approvals?.Validate(definition.AllowedWrites, options.TaskMaxProposals) ?? []).ToList();
         return errors.Count == 0
             ? null
             : BadRequest(new { error = string.Join(" ", errors), errors, code = "TASK_INVALID" });

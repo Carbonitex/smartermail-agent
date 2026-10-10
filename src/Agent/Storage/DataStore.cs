@@ -98,6 +98,34 @@ public sealed class DataStore
 
         // 2: a profile's own session idle timeout (minutes); NULL = the server's SESSION_IDLE_MINUTES.
         "ALTER TABLE profiles ADD COLUMN idle_minutes INTEGER;",
+
+        // 3: the approval queue. A task run proposes a write; a person approves it (executed once) or
+        // denies it. payload is DATA_KEY-sealed and erased at every terminal state; display and result
+        // are sealed to the profile's public key; the tool name is never in clear.
+        """
+        CREATE TABLE task_proposals (
+            id            TEXT PRIMARY KEY,
+            profile_id    TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+            task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            run_id        TEXT NOT NULL,
+            status        TEXT NOT NULL,
+            needs_passkey INTEGER NOT NULL,
+            dedupe        TEXT NOT NULL,
+            payload       TEXT,
+            display       TEXT NOT NULL,
+            result        TEXT,
+            error_code    TEXT,
+            created_at    INTEGER NOT NULL,
+            expires_at    INTEGER NOT NULL,
+            decided_at    INTEGER,
+            executed_at   INTEGER,
+            read          INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX task_proposals_profile ON task_proposals(profile_id, status, created_at);
+        CREATE INDEX task_proposals_dedupe ON task_proposals(dedupe, status);
+        CREATE INDEX task_proposals_expiry ON task_proposals(status, expires_at);
+        ALTER TABLE task_runs ADD COLUMN proposals INTEGER NOT NULL DEFAULT 0;
+        """,
     ];
 
     public DataStore(ServerOptions options, ILogger<DataStore> logger)

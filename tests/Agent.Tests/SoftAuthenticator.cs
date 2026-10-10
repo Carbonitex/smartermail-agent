@@ -79,7 +79,7 @@ internal sealed class SoftAuthenticator
     }
 
     /// <summary>A <c>navigator.credentials.get</c> answer for these options.</summary>
-    public JsonObject Get(JsonElement options, string origin, bool advanceCounter = true)
+    public JsonObject Get(JsonElement options, string origin, bool advanceCounter = true, bool userVerified = true)
     {
         var rpId = options.GetProperty("rpId").GetString()!;
         var clientData = ClientData("webauthn.get", options.GetProperty("challenge").GetString()!, origin);
@@ -88,7 +88,7 @@ internal sealed class SoftAuthenticator
 
         var authData = new List<byte>();
         authData.AddRange(SHA256.HashData(Encoding.UTF8.GetBytes(rpId)));
-        authData.Add(0x01 | 0x04);                   // UP | UV
+        authData.Add((byte)(userVerified ? 0x01 | 0x04 : 0x01));   // UP | UV, or UP only
         authData.AddRange(Counter(_counter));
         var data = authData.ToArray();
 

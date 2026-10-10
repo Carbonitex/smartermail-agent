@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using SmarterMailAgent.Auth;
+using SmarterMailAgent.Tasks.Approvals;
 
 namespace SmarterMailAgent.Mcp;
 
@@ -43,6 +44,11 @@ public sealed class ToolDispatcher(
 
         /// <summary>A dry run answered this write itself; SmarterMail was never called.</summary>
         public bool Simulated { get; init; }
+
+        /// <summary>An approval write: queued as this proposal instead of run; SmarterMail was never called.</summary>
+        public string? ProposalId { get; init; }
+
+        public bool Proposed => ProposalId is not null;
     }
 
     /// <summary>A browser (or MCP-token) call, as the chat makes it.</summary>
@@ -65,6 +71,10 @@ public sealed class ToolDispatcher(
             return Refuse(Status.UnknownTool, $"Unknown tool '{name}'.");
 
         var (requested, toolArguments) = SplitAccount(arguments);
+        // A task's model may annotate an approval write; the tool itself never sees the note.
+        string? note = null;
+        if (context.Gate is not null)
+            (note, toolArguments) = SplitNote(toolArguments);
 
         switch (ToolPolicy.Resolve(name, entry.Scope, entry.Write, context.Accounts, requested))
         {
@@ -79,8 +89,22 @@ public sealed class ToolDispatcher(
             case ToolPolicy.Resolution<Account>.Ok ok:
                 if (entry.Write && context.Gate is { } gate)
                 {
-                    switch (gate.Admit(name))
+                    switch (gate.Admit(name, ok.Account, toolArguments))
                     {
+                        case ToolGate.Decision.Propose:
+                            return await ProposeAsync(gate, entry, ok.Account, toolArguments, note, ct);
+                        case ToolGate.Decision.OverBudget when gate.IsApprovalWrite(name):
+                            logger.LogInformation("Task gate refused write tool {Tool}: proposal budget spent.", name);
+                            return Refuse(Status.NotAllowed,
+                                $"This task may queue at most {gate.MaxProposals} change(s) for approval per run, and that " +
+                                "budget is spent. Queue nothing more; list what is left in your report.");
+                        case ToolGate.Decision.DryRun when gate.IsApprovalWrite(name):
+                            logger.LogInformation("Dry run: approval write tool {Tool} simulated.", name);
+                            return new Outcome(Status.Ok, SimulatedProposal(name, ok.Account.Handle, toolArguments), ok.Account.Handle,
+                                TimeSpan.Zero)
+                            {
+                                Simulated = true,
+                            };
                         case ToolGate.Decision.NotAllowed:
                             logger.LogInformation("Task gate refused write tool {Tool}: not allowed.", name);
                             return Refuse(Status.NotAllowed,
@@ -112,6 +136,73 @@ public sealed class ToolDispatcher(
                 throw new InvalidOperationException("Unhandled account resolution.");
         }
     }
+
+    private async Task<Outcome> ProposeAsync(
+        ToolGate gate, ToolEntry entry, Account account, IReadOnlyDictionary<string, JsonElement>? arguments, string? note,
+        CancellationToken ct)
+    {
+        if (gate.Proposals is not { } sink)
+        {
+            gate.ReturnProposal();
+            return Refuse(Status.NotAllowed,
+                $"'{entry.Name}' needs the user's approval and cannot be queued here. Do not retry it; list it in your report.");
+        }
+
+        switch (await sink.CreateAsync(entry, account, arguments, note, ct))
+        {
+            case ProposalResult.Queued queued:
+                logger.LogInformation("Task gate queued write tool {Tool} for approval.", entry.Name);
+                return new Outcome(Status.Ok, Queued(queued.Id), account.Handle, TimeSpan.Zero) { ProposalId = queued.Id };
+            case ProposalResult.TooLarge tooLarge:
+                gate.ReturnProposal();
+                return Refuse(Status.NotAllowed,
+                    $"{tooLarge.Message} This call is too large to queue for approval: nothing was queued or changed. " +
+                    "Mention it in your report.");
+            default:
+                gate.ReturnProposal();
+                return Refuse(Status.NotAllowed,
+                    "The approval queue is full: nothing was queued or changed. Do not retry; list the change in your report.");
+        }
+    }
+
+    private static CallToolResult Queued(string proposalId) =>
+        new()
+        {
+            Content =
+            [
+                new TextContentBlock
+                {
+                    Text = JsonSerializer.Serialize(new
+                    {
+                        queued = true,
+                        proposalId,
+                        note = "Queued for the user's approval. It has NOT happened. Do not retry it or make the same change " +
+                               "another way. List it in your report as awaiting approval.",
+                    }),
+                },
+            ],
+        };
+
+    private static CallToolResult SimulatedProposal(string name, string handle, IReadOnlyDictionary<string, JsonElement>? arguments) =>
+        new()
+        {
+            Content =
+            [
+                new TextContentBlock
+                {
+                    Text = JsonSerializer.Serialize(new
+                    {
+                        dryRun = true,
+                        queued = true,
+                        note = "Test run: in a real run this change would be queued for the user's approval, not made. " +
+                               "Nothing was queued or changed. Carry on, and list it in your report as awaiting approval.",
+                        wouldQueue = name,
+                        account = handle,
+                        arguments,
+                    }),
+                },
+            ],
+        };
 
     private static CallToolResult Simulated(string name, string handle, IReadOnlyDictionary<string, JsonElement>? arguments) =>
         new()
@@ -198,6 +289,22 @@ public sealed class ToolDispatcher(
         return (account, rest);
     }
 
+    /// <summary>
+    /// Separates <c>approvalNote</c> (see <see cref="ApprovalNote"/>) from the tool's own arguments.
+    /// Only a task's calls are split: in a chat the argument does not exist.
+    /// </summary>
+    public static (string? Note, IReadOnlyDictionary<string, JsonElement>? Arguments) SplitNote(
+        IReadOnlyDictionary<string, JsonElement>? arguments)
+    {
+        if (arguments is null || !arguments.TryGetValue(ApprovalNote.Property, out var value))
+            return (null, arguments);
+
+        var rest = arguments
+            .Where(kv => kv.Key != ApprovalNote.Property)
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        return (value.ValueKind == JsonValueKind.String ? value.GetString() : null, rest);
+    }
+
     private static Outcome Refuse(Status status, string message) =>
         new(status, ToolInvoker.ErrorResult(message), null, TimeSpan.Zero);
 
@@ -240,25 +347,96 @@ public sealed class SessionToolContext(Session session, SessionStore store) : IT
 /// <summary>
 /// The limits a scheduled task puts on writes, enforced here and not only by the tool list the model
 /// was shown: an explicit allowlist of tool names, a budget per run, and dry-run (writes answered
-/// without calling SmarterMail).
+/// without calling SmarterMail), and approval writes (proposed instead of run, with their own budget;
+/// see <c>Tasks/Approvals</c>). <see cref="Approved"/> makes the one-shot gate an approved proposal
+/// executes under.
 /// </summary>
 public sealed class ToolGate(IReadOnlySet<string> allowedWrites, int maxWrites, bool dryRun)
 {
-    private int _writes;
+    private static readonly IReadOnlySet<string> None = new HashSet<string>(StringComparer.Ordinal);
 
-    public enum Decision { Run, DryRun, NotAllowed, OverBudget }
+    private int _writes;
+    private int _proposals;
+    private int _approvedUsed;
+    private (string Tool, string AccountId, string ArgsHash)? _approved;
+
+    public enum Decision { Run, DryRun, NotAllowed, OverBudget, Propose }
 
     public IReadOnlySet<string> AllowedWrites => allowedWrites;
     public int MaxWrites => maxWrites;
     public bool DryRunMode => dryRun;
 
+    /// <summary>The allowed writes that are proposed for approval instead of run.</summary>
+    public IReadOnlySet<string> ApprovalWrites { get; init; } = None;
+
+    /// <summary>Proposals one run may make (simulated ones in a dry run included).</summary>
+    public int MaxProposals { get; init; }
+
+    /// <summary>Where proposals go; null = approval writes are refused.</summary>
+    public IProposalSink? Proposals { get; init; }
+
     /// <summary>Writes admitted so far (simulated ones included).</summary>
     public int Writes => Volatile.Read(ref _writes);
 
-    public Decision Admit(string toolName)
+    /// <summary>Proposals admitted so far (simulated ones included).</summary>
+    public int ProposalsAdmitted => Volatile.Read(ref _proposals);
+
+    public bool IsApprovalWrite(string toolName) => _approved is null && ApprovalWrites.Contains(toolName);
+
+    /// <summary>
+    /// A gate that admits exactly one call: <paramref name="tool"/>, on account
+    /// <paramref name="accountId"/>, with arguments whose canonical hash is <paramref name="argsHash"/>.
+    /// Then nothing, not even the same call again.
+    /// </summary>
+    public static ToolGate Approved(string tool, string accountId, string argsHash)
     {
+        var gate = new ToolGate(new HashSet<string>(StringComparer.Ordinal) { tool }, 1, dryRun: false);
+        gate._approved = (tool, accountId, argsHash);
+        return gate;
+    }
+
+    /// <summary>The name-only check (allowlist, budget, dry run). An approved gate refuses it.</summary>
+    public Decision Admit(string toolName) => Admit(toolName, null, null);
+
+    /// <summary>
+    /// In order: not allowed → <see cref="Decision.NotAllowed"/>; an approval write → over its own
+    /// budget, else <see cref="Decision.DryRun"/> in a dry run, else <see cref="Decision.Propose"/>
+    /// (never consumes <see cref="MaxWrites"/>); otherwise the write budget, then run or dry run.
+    /// </summary>
+    public Decision Admit(string toolName, Account? account, IReadOnlyDictionary<string, JsonElement>? arguments)
+    {
+        if (_approved is { } approved)
+        {
+            if (account is null || !string.Equals(toolName, approved.Tool, StringComparison.Ordinal) ||
+                !string.Equals(account.Id, approved.AccountId, StringComparison.Ordinal))
+                return Decision.NotAllowed;
+            string hash;
+            try
+            {
+                hash = ProposalHash.Of(toolName, account.Id, arguments);
+            }
+            catch (ProposalHash.InvalidArgumentsException)
+            {
+                return Decision.NotAllowed;
+            }
+            if (!ProposalHash.Matches(approved.ArgsHash, hash))
+                return Decision.NotAllowed;
+            return Interlocked.CompareExchange(ref _approvedUsed, 1, 0) == 0 ? Decision.Run : Decision.NotAllowed;
+        }
+
         if (!allowedWrites.Contains(toolName))
             return Decision.NotAllowed;
+
+        if (ApprovalWrites.Contains(toolName))
+        {
+            if (Interlocked.Increment(ref _proposals) > MaxProposals)
+            {
+                Interlocked.Decrement(ref _proposals);
+                return Decision.OverBudget;
+            }
+            return dryRun ? Decision.DryRun : Decision.Propose;
+        }
+
         if (Interlocked.Increment(ref _writes) > maxWrites)
         {
             Interlocked.Decrement(ref _writes);
@@ -266,4 +444,7 @@ public sealed class ToolGate(IReadOnlySet<string> allowedWrites, int maxWrites, 
         }
         return dryRun ? Decision.DryRun : Decision.Run;
     }
+
+    /// <summary>Gives back a proposal slot whose proposal was not queued (queue full, too large).</summary>
+    internal void ReturnProposal() => Interlocked.Decrement(ref _proposals);
 }
