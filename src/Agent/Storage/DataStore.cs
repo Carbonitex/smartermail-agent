@@ -157,6 +157,10 @@ public sealed class DataStore
         ALTER TABLE profiles ADD COLUMN task_access_at INTEGER;
         ALTER TABLE profiles ADD COLUMN task_invite_id TEXT;
         """,
+
+        // 6: the profile's standing instructions for scheduled runs, sealed with DATA_KEY (the chat's copy is
+        // in the browser-encrypted settings). NULL = none, or the owner keeps them to chats.
+        "ALTER TABLE profiles ADD COLUMN task_instructions TEXT;",
     ];
 
     public DataStore(ServerOptions options, ILogger<DataStore> logger)

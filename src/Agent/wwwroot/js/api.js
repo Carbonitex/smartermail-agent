@@ -323,6 +323,14 @@ export function setDelegation(accountId, enabled) {
   return request('/profile/accounts/' + encodeURIComponent(accountId) + '/delegation', { method: 'PUT', body: { enabled } });
 }
 
+/**
+ * PUT /api/profile/task-instructions → the profile view. The standing instructions scheduled runs use
+ * (sealed with the server key); null or '' clears them.
+ */
+export function setTaskInstructions(text) {
+  return request('/profile/task-instructions', { method: 'PUT', body: { text: text || null } });
+}
+
 /** PUT /api/profile/task-key → the profile view. The OpenRouter key scheduled tasks use; null clears it. */
 export function setTaskKey(key) {
   return request('/profile/task-key', { method: 'PUT', body: { key: key || null } });
@@ -353,7 +361,7 @@ export function adminRevokeInvite(id, profiles) {
   return request('/admin/invites/' + encodeURIComponent(id) + (profiles ? '?profiles=true' : ''), { method: 'DELETE' });
 }
 
-/** DELETE /api/admin/access/{profileId} → 204: tasks paused, task key deleted, pending approvals denied. */
+/** DELETE /api/admin/access/{profileId} → 204: tasks paused, task key and instructions deleted, pending approvals denied. */
 export function adminRevokeAccess(profileId) {
   return request('/admin/access/' + encodeURIComponent(profileId), { method: 'DELETE' });
 }

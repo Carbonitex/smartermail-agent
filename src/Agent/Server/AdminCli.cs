@@ -20,7 +20,7 @@ public static class AdminCli
           invites revoke <id> [--profiles]                     stop a code; --profiles also revokes every profile that used it
           access list                                          profiles that may use tasks
           access grant <profileId>                             give a profile access without a code
-          access revoke <profileId>                            take it away: tasks paused, task key deleted, pending approvals denied
+          access revoke <profileId>                            take it away: tasks paused, task key and instructions deleted, pending approvals denied
         """;
 
     public static bool Handles(string[] args) => args.Length > 0 && args[0] is "invites" or "access";
@@ -115,7 +115,7 @@ public static class AdminCli
             case ["access", "revoke", var profileId]:
                 if (!store.RevokeAccess(profileId))
                     return Fail(error, $"Profile {profileId} has no task access (or does not exist).");
-                output.WriteLine($"Profile {profileId}: access revoked, tasks paused, task key deleted, pending approvals denied.");
+                output.WriteLine($"Profile {profileId}: access revoked, tasks paused, task key and instructions deleted, pending approvals denied.");
                 return 0;
 
             default:

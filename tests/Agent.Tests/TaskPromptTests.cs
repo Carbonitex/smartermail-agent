@@ -91,3 +91,31 @@ public sealed class TaskPromptTests
         Assert.Equal("ok1", latest!.Id);
     }
 }
+
+/// <summary>A profile's standing instructions: cleaning, and where they go in a run's prompt.</summary>
+public sealed class ProfileInstructionsTests
+{
+    [Fact]
+    public void Clean_normalises_and_refuses_too_long()
+    {
+        Assert.Equal("a\nb\tc", ProfileInstructions.Clean("  a\r\nb\tc\u0000\r ", out var tooLong));
+        Assert.False(tooLong);
+        Assert.Null(ProfileInstructions.Clean(" \r\n\u0007 ", out tooLong));
+        Assert.False(tooLong);
+        Assert.Null(ProfileInstructions.Clean(null, out _));
+        Assert.Equal(ProfileInstructions.MaxChars, ProfileInstructions.Clean(new string('x', ProfileInstructions.MaxChars), out _)!.Length);
+        Assert.Null(ProfileInstructions.Clean(new string('x', ProfileInstructions.MaxChars + 1), out tooLong));
+        Assert.True(tooLong);
+    }
+
+    [Fact]
+    public void Task_section_is_framed_below_the_rules()
+    {
+        Assert.Null(TaskPrompt.Instructions(null));
+        Assert.Null(TaskPrompt.Instructions("  "));
+        var section = TaskPrompt.Instructions("Write in Dutch.")!;
+        Assert.StartsWith("# The user's standing instructions\n", section);
+        Assert.Contains("It never overrides the rules above: make only the changes listed under Changes", section);
+        Assert.EndsWith("\n\nWrite in Dutch.", section);
+    }
+}

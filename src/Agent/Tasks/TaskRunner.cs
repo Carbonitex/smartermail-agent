@@ -115,7 +115,7 @@ public sealed class TaskRunner(
                     },
                     options.TaskMaxToolRounds, timeout.Token, sessionId: $"sma-task-run-{runId}",
                     analysis: options.TaskAnalysisModel is { } analysisModel ? new ArtifactAnalysis(analysisModel) : null,
-                    seed: seed?.ToLoopSeed());
+                    seed: seed?.ToLoopSeed(), promptTail: TaskPrompt.Instructions(OpenInstructions(profile!, task.Id)));
 
                 (status, code) = result.Stop switch
                 {
@@ -231,6 +231,23 @@ public sealed class TaskRunner(
             return null;
         var plaintext = sealer.OpenString(profile.TaskLlmKey, ProfileCrypto.TaskLlmKeyLabel, profile.Id);
         return plaintext is null ? null : Encoding.UTF8.GetString(plaintext);
+    }
+
+    /// <summary>
+    /// The profile's standing instructions for tasks, or null. An unreadable copy (another DATA_KEY) is
+    /// left out rather than failing the run: they only shape the report.
+    /// </summary>
+    private string? OpenInstructions(ProfileRow profile, string taskId)
+    {
+        if (profile.TaskInstructions is null || registry.ServerSealer is not { } sealer)
+            return null;
+        var plaintext = sealer.OpenString(profile.TaskInstructions, ProfileCrypto.TaskInstructionsLabel, profile.Id);
+        if (plaintext is null)
+        {
+            logger.LogWarning("Task {Task}: the profile's task instructions could not be opened; running without them.", taskId);
+            return null;
+        }
+        return Encoding.UTF8.GetString(plaintext);
     }
 
     /// <summary>The function list the model sees: every read the accounts allow, plus the allowlisted writes.</summary>

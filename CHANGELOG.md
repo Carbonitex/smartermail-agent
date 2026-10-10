@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Agent (server mode): standing instructions for a profile (Profile → Settings, up to 4,000
+  characters), added to the end of every chat's system prompt from the encrypted settings, and, when
+  chosen, of every scheduled run's from a copy sealed with `DATA_KEY`
+  (`PUT /api/profile/task-instructions`). They never widen what a chat or task may do.
 - Agent (server mode): a Settings section in the Profile menu. A profile chooses its own session
   idle timeout (5 minutes up to the new `PROFILE_MAX_IDLE_MINUTES`, default 480), applied at once to
   every session of it, and whether accounts added to it start with changes allowed.

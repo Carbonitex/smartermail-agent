@@ -8,6 +8,7 @@
 import * as api from './api.js';
 import * as profile from './profile.js';
 import { adminSection } from './admin-ui.js';
+import { MAX_INSTRUCTIONS, cleanInstructions } from './llm.js';
 import { prfSupported, passkeyErrorMessage, NoPrfError } from './passkey.js';
 
 const $ = (id) => document.getElementById(id);
@@ -45,6 +46,7 @@ let offerDismissed = false;
  * hooks: {
  *   getSession(), currentSettings() → { openRouterKey, model, toolsOff, allowChanges },
  *   onIdleChanged(minutes), getAllowChanges(), setAllowChanges(value),
+ *   getInstructions() → { text, forTasks }, setInstructions({ text, forTasks }) (async),
  *   onSignedIn({ session, skipped, settings }), onSession(session), onEnded(message),
  *   notice(text, kind), setLoginError(text), closeOtherPopovers()
  * }
@@ -344,6 +346,7 @@ function renderPopover() {
   const allowText = document.createElement('span');
   allowText.textContent = 'Accounts I add start with changes allowed';
   allowLabel.append(allow, allowText);
+  add(instructionsEditor());
 
   // Passkeys
   add(section('Passkeys'));
@@ -451,6 +454,75 @@ function renderPopover() {
   });
 
   el.popover.replaceChildren(...parts);
+}
+
+/**
+ * Settings → Instructions: standing instructions added to the end of every
+ * chat's system prompt (kept in the encrypted settings) and, when ticked, every
+ * scheduled run's (a copy sealed with the server's key).
+ */
+function instructionsEditor() {
+  const box = document.createElement('div');
+  box.className = 'profile-instructions';
+  const current = hooks.getInstructions();
+  const tasksOffered = view.tasksEnabled && !needsTaskInvite(view);
+
+  const label = document.createElement('label');
+  label.className = 'profile-label';
+  label.textContent = 'Instructions for the agent';
+  label.htmlFor = 'profile-instructions-text';
+  const text = document.createElement('textarea');
+  text.id = 'profile-instructions-text';
+  text.className = 'profile-input';
+  text.rows = 4;
+  text.maxLength = MAX_INSTRUCTIONS;
+  text.placeholder = 'e.g. Answer in Dutch. Sign drafts "— Sam". Times in 24-hour format.';
+  text.value = current.text;
+  text.disabled = !profile.hasKeys();
+
+  const count = document.createElement('span');
+  count.className = 'hint';
+  const counted = () => { count.textContent = `${text.value.length} / ${MAX_INSTRUCTIONS}`; };
+  counted();
+  text.addEventListener('input', counted);
+
+  let tasks = null;
+  if (tasksOffered) {
+    tasks = document.createElement('input');
+    tasks.type = 'checkbox';
+    tasks.checked = current.forTasks;
+    tasks.disabled = text.disabled;
+  }
+
+  const save = button('Save instructions', (b) => busy(b, async () => {
+    const cleaned = cleanInstructions(text.value);
+    const forTasks = !!(tasks && tasks.checked);
+    await hooks.setInstructions({ text: cleaned, forTasks });
+    if (tasksOffered && (forTasks || view.hasTaskInstructions)) {
+      view = await api.setTaskInstructions(forTasks ? cleaned : null);
+    }
+    hooks.notice(cleaned ? 'Instructions saved. This chat uses them from your next message.' : 'Instructions removed.', 'info');
+    renderPopover();
+  }));
+  save.disabled = text.disabled;
+
+  const row = document.createElement('div');
+  row.className = 'profile-row';
+  row.append(count, save);
+  box.append(label, text);
+  if (tasks) {
+    const tasksLabel = document.createElement('label');
+    tasksLabel.className = 'tools-option';
+    const tasksText = document.createElement('span');
+    tasksText.textContent = 'Use them in scheduled tasks too';
+    tasksLabel.append(tasks, tasksText);
+    box.appendChild(tasksLabel);
+  }
+  box.appendChild(row);
+  box.appendChild(para(tasksOffered && view.hasTaskInstructions
+    ? 'Added to the end of every chat and scheduled task. The tasks\' copy is sealed with this server\'s key.'
+    : 'Added to the end of every chat. They shape tone and defaults; they cannot let the agent do more than your settings allow.'));
+  return box;
 }
 
 /** The idle timeouts offered: the server default, then the usual steps within the server's range. */

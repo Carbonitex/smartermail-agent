@@ -310,6 +310,7 @@ public sealed class TaskInviteHttpTests : IDisposable
                  {
                      (HttpMethod.Put, $"/api/profile/accounts/{account.Id}/delegation", new { enabled = true }),
                      (HttpMethod.Put, "/api/profile/task-key", new { key = "sk-or-test" }),
+                     (HttpMethod.Put, "/api/profile/task-instructions", new { text = "Reply in French." }),
                      (HttpMethod.Post, "/api/tasks", new { name = "T", prompt = "p", cron = "0 7 * * *" }),
                      (HttpMethod.Put, "/api/tasks/t1", new { name = "T", prompt = "p", cron = "0 7 * * *" }),
                      (HttpMethod.Post, "/api/tasks/t1/run", new { dryRun = true }),
@@ -325,6 +326,7 @@ public sealed class TaskInviteHttpTests : IDisposable
         // Reading, clearing and turning things off stay open.
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Req(HttpMethod.Get, "/api/tasks", cookie))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Req(HttpMethod.Put, "/api/profile/task-key", cookie, new { key = (string?)null }))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Req(HttpMethod.Put, "/api/profile/task-instructions", cookie, new { text = "  " }))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Req(HttpMethod.Put, $"/api/profile/accounts/{account.Id}/delegation", cookie, new { enabled = false }))).StatusCode);
 
         // A wrong code, then the right one.
@@ -372,6 +374,55 @@ public sealed class TaskInviteHttpTests : IDisposable
         var task = tasks.Get(profileId, "t1")!;
         Assert.False(task.Enabled);
         Assert.Empty(_llm.Requests);   // never reached the model
+    }
+
+    [Fact]
+    public async Task Task_instructions_are_sealed_reach_the_run_and_go_with_access()
+    {
+        using var client = Client();
+        var registry = _app.Services.GetRequiredService<ProfileRegistry>();
+        var profiles = _app.Services.GetRequiredService<ProfileStore>();
+        var invites = _app.Services.GetRequiredService<TaskInviteStore>();
+        var (profileId, session, account, _) = ProfileSession();
+        Assert.True(invites.Grant(profileId));
+        var cookie = session.Id;
+
+        using (var tooLong = await client.SendAsync(Req(HttpMethod.Put, "/api/profile/task-instructions", cookie,
+                   new { text = new string('x', ProfileInstructions.MaxChars + 1) })))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+            Assert.Equal("INSTRUCTIONS_TOO_LONG", (await Json(tooLong)).GetProperty("code").GetString());
+        }
+
+        using (var saved = await client.SendAsync(Req(HttpMethod.Put, "/api/profile/task-instructions", cookie,
+                   new { text = "\r\n  Sign every report \"-- R2\".\u0007\r\n" })))
+        {
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            Assert.True((await Json(saved)).GetProperty("hasTaskInstructions").GetBoolean());
+        }
+        var stored = profiles.GetProfile(profileId)!.TaskInstructions!;
+        Assert.DoesNotContain("R2", stored);   // sealed at rest
+
+        // A run gets them at the end of its system prompt.
+        Assert.True(session.Profile!.SetDelegation(account.Id, true));
+        profiles.UpdateTaskLlmKey(profileId, registry.ServerSealer!.SealString(Encoding.UTF8.GetBytes("sk-or-test"), ProfileCrypto.TaskLlmKeyLabel, profileId));
+        var now = DataStore.Now();
+        var tasks = _app.Services.GetRequiredService<TaskStore>();
+        var definition = new TaskDefinition(1, "T", "p", "0 7 * * *", "UTC", [account.Id], [], 0, "m", null);
+        tasks.Insert(new TaskRow("t1", profileId, true, definition.Seal(registry.ServerSealer!, profileId, "t1"), now - 1000, "ok", 0, null, now, now));
+        _llm.Final("done");
+        var scheduler = _app.Services.GetRequiredService<TaskRunScheduler>();
+        Assert.Equal(1, scheduler.StartDue(DateTimeOffset.UtcNow));
+        await scheduler.WhenIdleAsync();
+        var system = _llm.Requests[0]["messages"]![0]!["content"]!.GetValue<string>();
+        Assert.Contains("# The user's standing instructions", system);
+        Assert.EndsWith("\n\nSign every report \"-- R2\".", system);   // cleaned: trimmed, the BEL removed
+
+        // Losing access deletes them with the task key.
+        Assert.True(invites.RevokeAccess(profileId));
+        Assert.Null(profiles.GetProfile(profileId)!.TaskInstructions);
+        var view = await Json(await client.SendAsync(Req(HttpMethod.Get, "/api/profile", cookie)));
+        Assert.False(view.GetProperty("hasTaskInstructions").GetBoolean());
     }
 
     [Fact]

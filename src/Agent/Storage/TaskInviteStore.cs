@@ -162,7 +162,7 @@ public sealed class TaskInviteStore(DataStore db)
 
     /// <summary>
     /// Takes a profile's access away, in the database only (the operator's CLI is another process): its
-    /// tasks are paused with <see cref="NotInvitedCode"/>, its task key is deleted and its pending approvals
+    /// tasks are paused with <see cref="NotInvitedCode"/>, its task key and task instructions are deleted and its pending approvals
     /// are denied. Its delegated accounts stay sealed with <c>DATA_KEY</c> until the owner next unlocks the
     /// profile, which moves them back under the profile key; meanwhile the daily keep-alive skips them.
     /// False when the profile had no access.
@@ -175,7 +175,7 @@ public sealed class TaskInviteStore(DataStore db)
         int changed;
         using (var cmd = c.Command(
                    """
-                   UPDATE profiles SET task_access_at = NULL, task_invite_id = NULL, task_llm_key = NULL
+                   UPDATE profiles SET task_access_at = NULL, task_invite_id = NULL, task_llm_key = NULL, task_instructions = NULL
                    WHERE id = $id AND task_access_at IS NOT NULL
                    """, ("$id", profileId)))
         {

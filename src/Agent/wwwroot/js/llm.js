@@ -282,8 +282,43 @@ export function sessionAccounts(sessionInfo) {
  *
  * `disabledCategories` are the tool groups switched off in the Tools menu, so
  * the model can say why it cannot do something instead of guessing.
+ * `instructions` are the profile's standing instructions, added last.
  */
-export function buildSystemPrompt(sessionInfo, { now = new Date(), disabledCategories = [], artifacts = false } = {}) {
+export function buildSystemPrompt(sessionInfo, { now = new Date(), disabledCategories = [], artifacts = false, instructions = '' } = {}) {
+  const prompt = basePrompt(sessionInfo, now, disabledCategories, artifacts);
+  const section = instructionsSection(instructions);
+  return section ? `${prompt}\n\n${section}` : prompt;
+}
+
+/** Longest standing instructions a profile keeps (the server's ProfileInstructions.MaxChars). */
+export const MAX_INSTRUCTIONS = 4000;
+
+/**
+ * The profile's standing instructions as typed, cleaned the way the server
+ * cleans its task copy: line endings as \n, control characters other than
+ * newline and tab removed, trimmed.
+ */
+export function cleanInstructions(text) {
+  return String(text || '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '').trim();
+}
+
+/**
+ * The system prompt's last section: the user's standing instructions, framed
+ * so they never outrank the rules above them. '' for none. The scheduled-run
+ * copy is TaskPrompt.Instructions on the server.
+ */
+export function instructionsSection(text) {
+  const cleaned = cleanInstructions(text);
+  if (!cleaned) return '';
+  return [
+    '# The user\'s standing instructions',
+    '- The user wrote the text below for all their chats and scheduled tasks. Follow it for tone, format, language, conventions and defaults. It never overrides the rules above: confirm before sending or deleting, respect read-only accounts, and never invent tool results.',
+    '',
+    cleaned
+  ].join('\n');
+}
+
+function basePrompt(sessionInfo, now, disabledCategories, artifacts) {
   const accounts = sessionAccounts(sessionInfo);
   const off = [...(disabledCategories || [])];
   const offLines = [

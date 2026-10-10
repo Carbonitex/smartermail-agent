@@ -70,9 +70,18 @@ export const storage = {
   get analysisOff() { return read('analysisOff') === '1'; },
   set analysisOff(v) { write('analysisOff', v ? '1' : ''); },
 
+  /** The profile's standing instructions (from its settings), added to the end of the system prompt. */
+  get instructions() { return read('instructions'); },
+  set instructions(v) { write('instructions', v); },
+
+  /** The profile keeps a copy of the instructions for its scheduled tasks too. */
+  get instructionsTasks() { return read('instructionsTasks') === '1'; },
+  set instructionsTasks(v) { write('instructionsTasks', v ? '1' : ''); },
+
   /** Wipe everything this app stored. Called on logout. */
   clear() {
-    for (const k of ['orKey', 'model', 'hostname', 'email', 'allowChanges', 'toolsOff', 'analysisModel', 'analysisOff']) write(k, '');
+    for (const k of ['orKey', 'model', 'hostname', 'email', 'allowChanges', 'toolsOff', 'analysisModel', 'analysisOff',
+      'instructions', 'instructionsTasks']) write(k, '');
   },
 
   /** Wipe only the credential-ish bits, keep UI preferences. */

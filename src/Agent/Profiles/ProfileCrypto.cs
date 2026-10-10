@@ -25,6 +25,7 @@ public static class ProfileCrypto
     public const string ServerAccountsLabel = "sma-server-account-v1";
     public const string TaskDefinitionLabel = "sma-task-definition-v1";
     public const string TaskLlmKeyLabel = "sma-task-llm-key-v1";
+    public const string TaskInstructionsLabel = "sma-task-instructions-v1";
     private const string TranscriptInfo = "sma-run-transcript-v1";
     private const byte TranscriptFormat = 0x01;
 

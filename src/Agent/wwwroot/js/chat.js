@@ -245,7 +245,9 @@ function currentSettings() {
     toolsOff: [...state.disabled],
     allowChanges: !!state.allowChangesDefault,
     analysis: analysisOn(),
-    analysisModel: storage.analysisModel
+    analysisModel: storage.analysisModel,
+    instructions: storage.instructions,
+    instructionsTasks: storage.instructionsTasks
   };
 }
 
@@ -264,6 +266,8 @@ function applyProfileSettings(settings) {
   if (typeof settings.allowChanges === 'boolean') state.allowChangesDefault = settings.allowChanges;
   if (typeof settings.analysis === 'boolean') storage.analysisOff = !settings.analysis;
   if (typeof settings.analysisModel === 'string') storage.analysisModel = settings.analysisModel;
+  storage.instructions = typeof settings.instructions === 'string' ? settings.instructions : '';
+  storage.instructionsTasks = !!settings.instructionsTasks;
   renderAnalysisSettings();
 }
 
@@ -289,6 +293,16 @@ const profileHooks = {
   setAllowChanges(value) {
     state.allowChangesDefault = !!value;
     syncProfileSettings();
+  },
+
+  /** Settings: the profile's standing instructions, { text, forTasks }. */
+  getInstructions: () => ({ text: storage.instructions, forTasks: storage.instructionsTasks }),
+  /** Saves them to the profile's settings and swaps this chat's system prompt (the conversation is kept). */
+  async setInstructions({ text, forTasks }) {
+    storage.instructions = text;
+    storage.instructionsTasks = !!forTasks;
+    refreshSystemPrompt();
+    if (!await profile.saveSettings(currentSettings())) throw new Error('Unlock your profile with your passkey first.');
   },
 
   /** A passkey or recovery-code sign-in: settings back from the profile, then into the chat. */
@@ -762,7 +776,8 @@ function conversationId() {
 
 /** The system prompt for the current accounts and Tools-menu selection. */
 function systemPrompt() {
-  return buildSystemPrompt(state.session, { disabledCategories: presentDisabled(), artifacts: analysisOn() });
+  return buildSystemPrompt(state.session,
+    { disabledCategories: presentDisabled(), artifacts: analysisOn(), instructions: storage.instructions });
 }
 
 /** Swap the system prompt in place: the conversation after it is untouched. */

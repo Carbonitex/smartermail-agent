@@ -54,6 +54,8 @@ public sealed class ProfileController(
 
     public sealed record TaskKeyRequest(string? Key);
 
+    public sealed record TaskInstructionsRequest(string? Text);
+
     public sealed record PausedRequest(bool Paused);
 
     public sealed record TaskAccessRequest(string? Code);
@@ -88,7 +90,7 @@ public sealed class ProfileController(
         string Id, bool Unlocked, IReadOnlyList<PasskeyView> Passkeys, IReadOnlyList<StoredAccountView> Accounts,
         bool Recovery, string PublicKey, string EncryptedPrivateKey, long SettingsVersion,
         bool CanDelegate, bool TasksEnabled, bool HasTaskKey, bool TasksPaused, IdleView Idle, TaskAccessView TaskAccess,
-        bool Admin = false);
+        bool Admin = false, bool HasTaskInstructions = false);
 
     // ------------------------------------------------------------------ creation
 
@@ -444,6 +446,43 @@ public sealed class ProfileController(
     }
 
     /// <summary>
+    /// The profile's standing instructions for scheduled runs (<see cref="ProfileInstructions"/>), sealed with the
+    /// server key. The browser sends the same text it keeps in the encrypted settings for chats; empty or null
+    /// clears the server's copy. <c>400 INSTRUCTIONS_TOO_LONG</c> over <see cref="ProfileInstructions.MaxChars"/>.
+    /// </summary>
+    [HttpPut("task-instructions")]
+    [Authorize(Policy = "SessionAccess")]
+    public IActionResult PutTaskInstructions([FromBody] TaskInstructionsRequest request)
+    {
+        if (ProfileOf(out var session, out var profile) is { } refusal)
+            return refusal;
+        if (registry.ServerSealer is not { } sealer || !options.TasksEnabled)
+            return Conflict(new { error = "Scheduled tasks are not enabled on this server.", code = "TASKS_DISABLED" });
+
+        var text = ProfileInstructions.Clean(request.Text, out var tooLong);
+        if (tooLong)
+            return BadRequest(new
+            {
+                error = $"Instructions can be at most {ProfileInstructions.MaxChars} characters.", code = "INSTRUCTIONS_TOO_LONG",
+            });
+
+        if (text is null)
+        {
+            store.UpdateTaskInstructions(profile.Id, null);
+        }
+        else
+        {
+            if (!options.AllowsTasks(profile))
+                return TaskAccess.NotInvited(this);
+            var plaintext = System.Text.Encoding.UTF8.GetBytes(text);
+            store.UpdateTaskInstructions(profile.Id, sealer.SealString(plaintext, ProfileCrypto.TaskInstructionsLabel, profile.Id));
+            CryptographicOperations.ZeroMemory(plaintext);
+        }
+
+        return Ok(View(session, store.GetProfile(profile.Id)!));
+    }
+
+    /// <summary>
     /// Redeems an invite code for scheduled tasks (<c>TASKS_ACCESS=invite</c>). <c>400 INVITE_INVALID</c> for
     /// any code that cannot be used (unknown, used up, expired or revoked: the answer does not say which).
     /// A profile that already has access spends nothing.
@@ -564,7 +603,8 @@ public sealed class ProfileController(
             new IdleView(store.IdleMinutes(profile.Id), (int)SessionStore.IdleTimeout.TotalMinutes,
                 ServerOptions.ProfileMinIdleMinutes, options.ProfileMaxIdleMinutes),
             new TaskAccessView(options.TaskInviteOnly, options.AllowsTasks(profile)),
-            options.IsAdmin(profile.Id));
+            options.IsAdmin(profile.Id),
+            profile.TaskInstructions is not null);
     }
 
     /// <summary>

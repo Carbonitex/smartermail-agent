@@ -593,6 +593,9 @@ input:focus, textarea:focus, select:focus {
 .profile-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: .84rem; }
 .profile-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-input { flex: 1; min-width: 0; padding: 6px 8px; font-size: .84rem; }
+.profile-instructions { margin-top: 10px; }
+.profile-label { display: block; font-size: .84rem; margin-bottom: 4px; }
+.profile-instructions textarea { width: 100%; resize: vertical; font-size: .84rem; }
 .hint.warn { color: var(--amber); }
 .hint.error { color: oklch(80% 0.12 25); }
 

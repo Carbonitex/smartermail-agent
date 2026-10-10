@@ -81,7 +81,8 @@ function view(p) {
     tasksPaused: !!p.paused,
     idle: { minutes: p.idleMinutes ?? null, defaultMinutes: IDLE_DEFAULT, minMinutes: 5, maxMinutes: IDLE_MAX },
     taskAccess: { inviteOnly: INVITE_ONLY, granted: granted(p) },
-    admin: ADMIN
+    admin: ADMIN,
+    hasTaskInstructions: !!p.taskInstructions
   };
 }
 
@@ -260,6 +261,15 @@ export async function handle(ctx) {
   if (p === '/profile/task-key' && method === 'PUT') {
     if (body.key && !granted(profile)) return json(res, 403, notInvited), true;
     profile.taskKey = body.key || null;
+    json(res, 200, view(profile));
+    return true;
+  }
+  if (p === '/profile/task-instructions' && method === 'PUT') {
+    if (!TASKS) return json(res, 409, { error: 'Scheduled tasks are not enabled on this server.', code: 'TASKS_DISABLED' }), true;
+    const text = String(body.text || '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '').trim();
+    if (text.length > 4000) return json(res, 400, { error: 'Instructions can be at most 4000 characters.', code: 'INSTRUCTIONS_TOO_LONG' }), true;
+    if (text && !granted(profile)) return json(res, 403, notInvited), true;
+    profile.taskInstructions = text || null;
     json(res, 200, view(profile));
     return true;
   }
@@ -666,6 +676,7 @@ function admin(ctx, profile, s, body) {
     if (!x || !x.taskAccess) return json(res, 404, { error: 'That profile has no task access.', code: 'PROFILE_NOT_FOUND' });
     x.taskAccess = null;
     x.taskKey = null;
+    x.taskInstructions = null;
     res.writeHead(204);
     return res.end();
   }

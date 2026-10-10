@@ -50,7 +50,8 @@ public sealed class AgentLoop(OpenRouterClient llm, ILogger<AgentLoop>? logger =
     public async Task<Result> RunAsync(
         string apiKey, string model, string systemPrompt, string userPrompt, JsonArray tools,
         Func<string, IReadOnlyDictionary<string, JsonElement>?, CancellationToken, Task<ToolResult>> callTool,
-        int maxRounds, CancellationToken ct, string? sessionId = null, ArtifactAnalysis? analysis = null, Seed? seed = null)
+        int maxRounds, CancellationToken ct, string? sessionId = null, ArtifactAnalysis? analysis = null, Seed? seed = null,
+        string? promptTail = null)
     {
         // Artifacts: the analysis lines and analyze_result are fixed for the whole run (appended once, after the
         // catalog's tools), so every round still sends a byte-identical prefix.
@@ -62,6 +63,8 @@ public sealed class AgentLoop(OpenRouterClient llm, ILogger<AgentLoop>? logger =
             tools = (JsonArray)tools.DeepClone();
             tools.Add(ArtifactAnalyst.AnalyzeResultTool());
         }
+        if (!string.IsNullOrEmpty(promptTail))
+            systemPrompt = $"{systemPrompt}\n\n{promptTail}";   // the profile's standing instructions: always last
         long analysisPromptTokens = 0;
         var analysisCalls = 0;
 

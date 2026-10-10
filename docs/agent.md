@@ -78,6 +78,12 @@ passkey is lost; more passkeys can be added from the **Profile** menu.
   `PROFILE_MAX_IDLE_MINUTES`; the default is `SESSION_IDLE_MINUTES`), and whether accounts added
   later start with changes allowed. Within the idle time, a new tab or a restarted browser opens the
   profile without the passkey.
+- Profile → Settings → **Instructions for the agent**: up to 4,000 characters added to the end of every
+  chat's system prompt (language, tone, how to sign drafts, house conventions). They are kept in the
+  encrypted settings, so the server never reads them. Tick **Use them in scheduled tasks too** and a
+  copy sealed with `DATA_KEY` goes to the server, which adds it to every run's prompt. They cannot widen
+  what the agent may do: read-only accounts, a task's allowed changes and approvals are enforced by the
+  server, not by the prompt.
 - Browsers without PRF fall back to "Remember me on this device" when `RESUME_KEY` is set.
 
 ## Scheduled tasks (server mode with `DATA_KEY`)
@@ -111,7 +117,7 @@ scheduled tasks are closed to a profile until it redeems an **invite code** unde
 tasks** (or **Tasks**). Until then it cannot delegate an account, save a task key, create, edit or run
 a task, test a probe, or approve a queued change, and the server keeps none of its accounts alive.
 
-You make and revoke codes with the same image, against the same `DATA_DIR`. There is no admin web page.
+You make and revoke codes with the same image, against the same `DATA_DIR`:
 
 ```bash
 docker exec <container> dotnet SmarterMailAgent.dll invites create --note "for Sam"   # prints the code, once
@@ -131,7 +137,7 @@ profiles may use tasks. To everyone else the admin endpoints don't exist (`404`)
 A code is 16 characters (`XXXX-XXXX-XXXX-XXXX`, 80 random bits; case, spaces and dashes don't
 matter). It is good for one profile unless you set `--uses`, and never expires unless you set `--days`.
 The server stores only a hash of the code. Revoking a profile's access pauses its tasks, deletes its
-task key and denies its pending approvals. Its delegated accounts go back under the profile's own key
+task key and task instructions, and denies its pending approvals. Its delegated accounts go back under the profile's own key
 the next time the owner unlocks it, and they are no longer refreshed in the meantime. Switching an
 existing instance to `invite` affects profiles that already have tasks: give them access with
 `access grant` first, or their tasks pause on their next run.

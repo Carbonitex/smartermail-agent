@@ -98,7 +98,7 @@ Two xunit projects:
 | Project | Covers | Gates images |
 |---|---|---|
 | `tests/SmarterMail.Tests` | Core (`StartupSignIn`, `AuthResponseClassifier`, per-sign-in clientIds), tool-library guards (below), `Mcp.Hosting` (settings, read-only filter), `docs/tools.md` freshness | user, admin, agent |
-| `tests/Agent.Tests` | agent: policy, schemas, dispatch, roles, session accounts, account logout, `UserContextFactory`, MCP token scoping (in-process host via `WebApplicationFactory<Program>`), remember-me, proxy trust, connect-time SSRF guard, path base, home link; server mode: options, both modes over HTTP, sealer, SQLite store, profile runtime, a full passkey round trip (`SoftAuthenticator`), task definitions, the task gate, the server-side loop, a scheduled run against a fake LLM (`FakeLlm`), invite-only tasks (codes, store, gates, CLI). Runs serially (see `TestEnvironment.cs`) | agent |
+| `tests/Agent.Tests` | agent: policy, schemas, dispatch, roles, session accounts, account logout, `UserContextFactory`, MCP token scoping (in-process host via `WebApplicationFactory<Program>`), remember-me, proxy trust, connect-time SSRF guard, path base, home link; server mode: options, both modes over HTTP, sealer, SQLite store, profile runtime, a full passkey round trip (`SoftAuthenticator`), task definitions, the task gate, the server-side loop, a scheduled run against a fake LLM (`FakeLlm`), invite-only tasks (codes, store, gates, CLI), standing instructions. Runs serially (see `TestEnvironment.cs`) | agent |
 
 The guards in `tests/SmarterMail.Tests`:
 
@@ -198,6 +198,7 @@ Profiles/
   ProfileCrypto.cs            accounts-key check, recovery hash, sealing to the profile's public key
   PasskeyService.cs           WebAuthn ceremonies (fido2-net-lib), single-use, 2 minutes
   ProfileMaintenance.cs       ceremony sweep; daily idle-profile pruning and delegated-account keep-alive
+  ProfileInstructions.cs      standing instructions: cleaning, the 4,000-char cap, the framed prompt section
 Llm/
   OpenRouterClient.cs         non-streaming chat completions for scheduled runs; `BuildBody` lays out
                               prompt caching (below), `session_id` per run, usage incl. cached tokens + cost
@@ -739,7 +740,7 @@ Made in the browser (`js/vault.js`), HKDF-SHA-256 with a zero salt:
 | Key | From | Where it goes |
 |---|---|---|
 | profile key PK | 32 random bytes | wrapped (AES-GCM) under each passkey's PRF output (`sma-profile-wrap-v1`, PRF salt `smartermail-agent profile v1`) and optionally a recovery code (`sma-recovery-wrap-v1`); the wraps are stored, PK never leaves the browser |
-| settings key | `HKDF(PK, sma-settings-v1)` | never leaves the browser; encrypts `{ openRouterKey, model, toolsOff, allowChanges }`. Until the profile's idle timeout passes without activity (any successful request from a page holding the keys, like the server's idle clock) after the passkey or recovery code was used, it and the inbox key are kept in IndexedDB (`sma-profile`) as non-extractable `CryptoKey`s, so a reload, new tab or restarted browser on the still-unlocked profile session reopens the settings without the key prompt (`profile.reopenWarm`); cleared on logout and profile deletion |
+| settings key | `HKDF(PK, sma-settings-v1)` | never leaves the browser; encrypts `{ openRouterKey, model, toolsOff, allowChanges, analysis, analysisModel, instructions, instructionsTasks }`. Until the profile's idle timeout passes without activity (any successful request from a page holding the keys, like the server's idle clock) after the passkey or recovery code was used, it and the inbox key are kept in IndexedDB (`sma-profile`) as non-extractable `CryptoKey`s, so a reload, new tab or restarted browser on the still-unlocked profile session reopens the settings without the key prompt (`profile.reopenWarm`); cleared on logout and profile deletion |
 | accounts key | `HKDF(PK, sma-accounts-v1)`, raw | sent to `unlock`; `ProfileRuntime` keeps it (as a `Sealer`) while a session of the profile lives; the server stores only `HMAC(key, "sma-accounts-check-v1")` |
 | inbox key | `HKDF(PK, sma-inbox-v1)` | encrypts the PKCS#8 private half of a P-256 key pair; the public half is stored, and `ProfileCrypto.SealToPublicKey` seals every run transcript to it |
 | recovery auth | `HKDF(code secret, sma-recovery-auth-v1)` | sent to `recover`; the server stores its SHA-256 |
@@ -789,8 +790,30 @@ same login reuses the row id (`RowForLogin`), which tasks refer to.
   `GET|PUT /api/profile/settings` (opaque blob, optimistic `version`, `409 SETTINGS_STALE`),
   `POST /api/profile/passkeys/options` + `POST /api/profile/passkeys`, `DELETE /api/profile/passkeys/{id}`
   (`409 LAST_PASSKEY`), `PUT /api/profile/recovery`, `PUT /api/profile/accounts/{id}/delegation`,
-  `PUT /api/profile/task-key`, `PUT /api/profile/tasks-paused`, `DELETE /api/profile` (revokes every
-  account, ends every session of it). All cookie-only (`403 COOKIE_REQUIRED` for an MCP token).
+  `PUT /api/profile/task-key`, `PUT /api/profile/task-instructions` (below), `PUT /api/profile/tasks-paused`,
+  `DELETE /api/profile` (revokes every account, ends every session of it). All cookie-only
+  (`403 COOKIE_REQUIRED` for an MCP token).
+
+### Standing instructions
+
+A profile's own text for the model, at most 4,000 characters (`Profiles/ProfileInstructions.cs`; the
+browser's `cleanInstructions` / `MAX_INSTRUCTIONS` in `llm.js` match it: `\n` line endings, control
+characters other than newline and tab removed, trimmed). Edited under Profile → Settings.
+
+- **Chats**: kept in the encrypted settings (`instructions`), so the server never sees them; also in
+  sessionStorage for the tab. `buildSystemPrompt(…, { instructions })` appends `instructionsSection` as
+  the prompt's **last** section, "# The user's standing instructions", whose first line says it never
+  overrides the rules above. Saving swaps the system prompt in place (`refreshSystemPrompt`); the rest of
+  the prompt is byte-identical, so only the tail of the cached prefix changes.
+- **Tasks**, when "Use them in scheduled tasks too" is ticked (`instructionsTasks` in the settings):
+  the browser also sends the text to `PUT /api/profile/task-instructions { text }` → `200 ProfileView`
+  (`hasTaskInstructions`); empty or null clears. Sealed with `DATA_KEY` (`sma-task-instructions-v1`,
+  context = profile id) in `profiles.task_instructions` (migration 6). `400 INSTRUCTIONS_TOO_LONG`,
+  `409 TASKS_DISABLED`, `403 TASKS_NOT_INVITED` for setting (not clearing) without access.
+  `TaskRunner` opens them (unreadable = left out, logged) and hands `TaskPrompt.Instructions(text)` to
+  `AgentLoop.RunAsync` as `promptTail`, so they come after the trigger and artifact sections too.
+- They shape tone and defaults only. No gate reads them: read-only accounts, the write allowlist,
+  approvals and step-up are enforced by the dispatcher whatever the text says. Never logged.
 
 ### Scheduled tasks
 
@@ -850,15 +873,15 @@ redeemed a code or that the operator granted. `ServerOptions.AllowsTasks(Profile
   `{ profilesRevoked }`; `POST|DELETE /api/admin/access/{profileId}` → `204` (grant / revoke). `api`
   limiter. Logged: action + invite / profile id, never a code. The Settings section shows every
   profile its own id (with Copy), which is what the operator sees.
-- **Revoking access** (`RevokeAccess`, database only, since the CLI is another process): access and the
-  task key cleared, every task disabled with status `TASKS_NOT_INVITED`, pending proposals denied
+- **Revoking access** (`RevokeAccess`, database only, since the CLI is another process): access, the
+  task key and the task instructions cleared, every task disabled with status `TASKS_NOT_INVITED`, pending proposals denied
   (payload erased). Delegated rows stay `DATA_KEY`-sealed until the owner's next unlock, where
   `ProfileController.UndelegateWithoutAccess` moves the live ones back under the accounts key; the
   daily keep-alive skips profiles without access meanwhile.
 - **Gates**, each `403 TASKS_NOT_INVITED` (`Controllers/TaskAccess.cs`): delegation **on**, saving a
-  task key, task create / update / run, `POST /api/tasks/probe`, approve options / approve. Open
-  without access: reading tasks, runs and proposals, deleting tasks, denying, clearing the key,
-  delegation off, pausing. Unattended paths: `TaskRunner.Open` and `TriggerProber.ProbeAsync` fail with
+  task key or task instructions, task create / update / run, `POST /api/tasks/probe`, approve options / approve. Open
+  without access: reading tasks, runs and proposals, deleting tasks, denying, clearing the key or
+  the instructions, delegation off, pausing. Unattended paths: `TaskRunner.Open` and `TriggerProber.ProbeAsync` fail with
   `TASKS_NOT_INVITED`, a hard failure (`TaskStore.HardFailures`) that pauses the task, so an instance
   switched from `open` to `invite` stops existing tasks without anyone running a command.
 - **HTTP**: `POST /api/profile/task-access { code }` (cookie, `login` limiter) → `200 ProfileView`;

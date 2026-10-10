@@ -220,7 +220,10 @@ async function take(slot, fetchFresh) {
 
 /* ------------------------------------------------------------- settings */
 
-/** What the profile keeps for the chat: { openRouterKey, model, toolsOff: [...], allowChanges, analysis, analysisModel }. */
+/**
+ * What the profile keeps for the chat: { openRouterKey, model, toolsOff: [...], allowChanges, analysis, analysisModel,
+ * instructions, instructionsTasks }.
+ */
 async function openSettings(sealed) {
   if (!sealed || !keys) return null;
   try {
@@ -236,11 +239,14 @@ async function openSettings(sealed) {
  * across browsers: on SETTINGS_STALE the server's version is taken and the
  * write retried once. False when this page does not hold the keys.
  */
-export async function saveSettings({ openRouterKey, model, toolsOff, allowChanges, analysis = true, analysisModel = '' }) {
+export async function saveSettings({
+  openRouterKey, model, toolsOff, allowChanges, analysis = true, analysisModel = '', instructions = '', instructionsTasks = false
+}) {
   if (!keys) return false;
   const sealed = await vault.sealJson(keys.settingsKey,
     { v: 1, openRouterKey: openRouterKey || '', model: model || '', toolsOff: [...(toolsOff || [])], allowChanges: !!allowChanges,
-      analysis: analysis !== false, analysisModel: analysisModel || '' });
+      analysis: analysis !== false, analysisModel: analysisModel || '', instructions: instructions || '',
+      instructionsTasks: !!instructionsTasks });
   try {
     settingsVersion = (await api.saveProfileSettings(sealed, settingsVersion)).version;
   } catch (err) {
