@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SmarterMailAgent.Auth;
+using SmarterMailAgent.Llm.Artifacts;
 using SmarterMailAgent.Server;
 
 namespace SmarterMailAgent.Controllers;
@@ -18,10 +19,14 @@ public sealed class ConfigController(ServerOptions options, ResumeSealer sealer)
 
     public sealed record ProfilesConfig(bool Enabled);
 
-    public sealed record TasksConfig(bool Enabled, int MinIntervalMinutes, int MaxPerProfile, int MaxToolRounds);
+    /// <param name="AnalysisModel">The model scheduled runs hand large results to (TASK_ANALYSIS_MODEL); null = off.</param>
+    public sealed record TasksConfig(bool Enabled, int MinIntervalMinutes, int MaxPerProfile, int MaxToolRounds, string? AnalysisModel = null);
+
+    /// <summary>Large tool results in the browser: the default analysis model and the size that makes an artifact.</summary>
+    public sealed record AnalysisConfig(string DefaultModel, int ArtifactThresholdChars);
 
     /// <param name="Mode"><c>server</c> or <c>browser</c> (BROWSER_ONLY_MODE).</param>
-    public sealed record ConfigResponse(string Mode, ResumeConfig Resume, ProfilesConfig Profiles, TasksConfig Tasks);
+    public sealed record ConfigResponse(string Mode, ResumeConfig Resume, ProfilesConfig Profiles, TasksConfig Tasks, AnalysisConfig? Analysis = null);
 
     [HttpGet]
     public IActionResult Get() => Ok(new ConfigResponse(
@@ -29,5 +34,6 @@ public sealed class ConfigController(ServerOptions options, ResumeSealer sealer)
         new ResumeConfig(sealer.Enabled, sealer.Enabled ? (int)sealer.MaxAge.TotalDays : 0),
         new ProfilesConfig(options.ServerMode),
         new TasksConfig(options.TasksEnabled, (int)options.TaskMinInterval.TotalMinutes, options.TasksPerProfile,
-            options.TaskMaxToolRounds)));
+            options.TaskMaxToolRounds, options.TasksEnabled ? options.TaskAnalysisModel : null),
+        new AnalysisConfig(options.AnalysisModel, ArtifactStore.DefaultThreshold)));
 }

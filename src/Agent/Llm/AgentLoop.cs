@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using SmarterMailAgent.Llm.Artifacts;
 
 namespace SmarterMailAgent.Llm;
 
@@ -8,9 +10,13 @@ namespace SmarterMailAgent.Llm;
 /// (<c>wwwroot/js/llm.js</c>), with the same limits — at most <c>maxRounds</c> tool rounds, tool
 /// results clamped to 60,000 characters, the same handling of length / content-filter stops — minus
 /// streaming and the UI callbacks. Tool calls run one after another, in the order the model asked.
+/// With an <see cref="ArtifactAnalysis"/>, results over its threshold become artifact stubs and
+/// <c>analyze_result</c> runs a nested loop on the analysis model (see <c>Llm/Artifacts/</c>).
 /// </summary>
-public sealed class AgentLoop(OpenRouterClient llm)
+public sealed class AgentLoop(OpenRouterClient llm, ILogger<AgentLoop>? logger = null)
 {
+    private readonly ArtifactAnalyst _analyst = new(llm);
+
     public const int MaxToolResultChars = 60_000;
 
     /// <summary>What a tool call came back with.</summary>
@@ -32,8 +38,21 @@ public sealed class AgentLoop(OpenRouterClient llm)
     public async Task<Result> RunAsync(
         string apiKey, string model, string systemPrompt, string userPrompt, JsonArray tools,
         Func<string, IReadOnlyDictionary<string, JsonElement>?, CancellationToken, Task<ToolResult>> callTool,
-        int maxRounds, CancellationToken ct, string? sessionId = null)
+        int maxRounds, CancellationToken ct, string? sessionId = null, ArtifactAnalysis? analysis = null)
     {
+        // Artifacts: the analysis lines and analyze_result are fixed for the whole run (appended once, after the
+        // catalog's tools), so every round still sends a byte-identical prefix.
+        ArtifactStore? artifacts = null;
+        if (analysis is not null)
+        {
+            artifacts = new ArtifactStore(analysis.ThresholdChars, analysis.MaxRunChars, analysis.MaxArtifactChars);
+            systemPrompt = $"{systemPrompt}\n\n{ArtifactAnalyst.PromptLines}";
+            tools = (JsonArray)tools.DeepClone();
+            tools.Add(ArtifactAnalyst.AnalyzeResultTool());
+        }
+        long analysisPromptTokens = 0;
+        var analysisCalls = 0;
+
         // A run is one user turn, so nothing here is ever elided (the browser's elideOldToolResults works at
         // turn boundaries) and the request prefix only grows: every round can read the previous one's cache.
         var messages = new JsonArray
@@ -103,6 +122,19 @@ public sealed class AgentLoop(OpenRouterClient llm)
                         result = new ToolResult(
                             $"Error: the arguments for {call.Name} were not valid JSON. Retry with a JSON object.", true, null, false);
                     }
+                    else if (artifacts is not null && call.Name == ArtifactStore.AnalyzeResultName)
+                    {
+                        var outcome = await AnalyzeAsync(apiKey, artifacts, analysis!, arguments!, analysisCalls++, analysisPromptTokens, sessionId, ct);
+                        analysisPromptTokens += outcome.PromptTokens;
+                        promptTokens += outcome.PromptTokens;
+                        completionTokens += outcome.CompletionTokens;
+                        cachedTokens += outcome.CachedTokens;
+                        cacheWriteTokens += outcome.CacheWriteTokens;
+                        cost += outcome.Cost;
+                        foreach (var sub in outcome.Steps)
+                            steps.Add(new Step("tool", Clamp(sub.Output, 4000), $"analyze_result: {sub.Operator}", Clamp(sub.Arguments, 4000), null, sub.IsError));
+                        result = new ToolResult(outcome.Content, outcome.IsError, null, false);
+                    }
                     else
                     {
                         try
@@ -119,9 +151,13 @@ public sealed class AgentLoop(OpenRouterClient llm)
                         }
                     }
 
-                    var content = Clamp(result.Content);
+                    // A large result stays in this run's memory; the model, and the transcript, get the stub.
+                    var kept = artifacts?.Capture(call.Name, call.Arguments, result.Content, result.IsError);
+                    if (kept is { } k)
+                        logger?.LogInformation("Tool {Tool} result kept as an artifact: {Chars} chars.", call.Name, k.Artifact.Chars);
+                    var content = kept?.Stub ?? Clamp(result.Content);
                     messages.Add(ToolMessage(call.Id, content));
-                    steps.Add(new Step("tool", Clamp(result.Content, 4000), call.Name, Clamp(call.Arguments, 4000), result.Account,
+                    steps.Add(new Step("tool", Clamp(kept?.Stub ?? result.Content, 4000), call.Name, Clamp(call.Arguments, 4000), result.Account,
                         result.IsError, result.Simulated));
                 }
             }
@@ -142,6 +178,43 @@ public sealed class AgentLoop(OpenRouterClient llm)
             return new Result(stop, final, steps, toolCalls, promptTokens, completionTokens, code,
                 code is null ? null : notice, cachedTokens, cacheWriteTokens, cost);
         }
+    }
+
+    /// <summary>One analyze_result call: validated, budgeted, logged by size and counts only.</summary>
+    private async Task<ArtifactAnalyst.Outcome> AnalyzeAsync(
+        string apiKey, ArtifactStore artifacts, ArtifactAnalysis analysis, IReadOnlyDictionary<string, JsonElement> arguments,
+        int callIndex, long spent, string? sessionId, CancellationToken ct)
+    {
+        string Text(string key) => arguments.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()!.Trim() : "";
+        var handle = Text("artifact");
+        var question = Text("question");
+
+        ArtifactAnalyst.Outcome Refuse(string message) =>
+            new(true, message, "none", 0, [], "error", 0, 0, 0, 0, 0);
+
+        if (handle.Length == 0 || question.Length == 0)
+            return Refuse("analyze_result needs both \"artifact\" (a handle such as \"r1\" from a result stub) and \"question\".");
+        if (artifacts.Get(handle) is not { } artifact)
+        {
+            return Refuse(artifacts.Issued(handle)
+                ? $"Artifact {handle} is no longer kept (this run's artifacts are capped). Run the original tool again."
+                : $"There is no artifact {handle}. Use a handle from a result stub ({{\"artifact\":\"r1\",…}}).");
+        }
+        if (callIndex >= analysis.MaxCalls)
+            return Refuse($"This run has used its {analysis.MaxCalls} analyze_result calls. Answer from what you have.");
+        if (spent >= analysis.RunPromptTokens)
+            return Refuse("This run's analysis token budget is spent. Answer from what you have.");
+
+        var clock = Stopwatch.StartNew();
+        var remaining = analysis with { MaxPromptTokens = Math.Min(analysis.MaxPromptTokens, analysis.RunPromptTokens - spent) };
+        var outcome = await _analyst.AnalyzeAsync(apiKey, artifact, question, remaining,
+            sessionId is null ? null : $"{sessionId}-analysis", ct);
+        // Sizes and counts only: never the question, a pattern or any output.
+        logger?.LogInformation(
+            "analyze_result on a {Chars}-char artifact of {Tool}: {Mode}, {Stop}, {Rounds} round(s), {Calls} operator call(s), {PromptTokens} prompt token(s), {Ms} ms.",
+            artifact.Chars, artifact.Tool, outcome.Mode, outcome.Stop, outcome.Rounds, outcome.Steps.Count, outcome.PromptTokens,
+            clock.ElapsedMilliseconds);
+        return outcome;
     }
 
     private static JsonObject ToolMessage(string id, string content) =>

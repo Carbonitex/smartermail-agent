@@ -487,6 +487,23 @@ input:focus, textarea:focus, select:focus {
   padding: 8px 10px; max-height: 340px; overflow: auto; white-space: pre-wrap; word-break: break-word;
 }
 
+/* large results: artifact badge, download, analyze_result's nested calls */
+.tool-artifact {
+  flex: none; font-size: .72rem; color: var(--amber);
+  border: 1px solid oklch(75% 0.12 80 / 0.35); border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+}
+.artifact-download { font-size: .78rem; }
+.artifact-download a { color: var(--text-faint); }
+.analysis-meta { font-size: .8rem; color: var(--text-dim); margin-bottom: 6px; }
+.analysis-step { font-size: .8rem; margin-top: 4px; }
+.analysis-step > summary {
+  cursor: pointer; color: var(--text-faint); font-family: var(--mono); font-size: .76rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.analysis-step.error > summary { color: var(--red); }
+.analysis-step > .tool-pre { margin-top: 4px; }
+.analysis-group .analysis-model { width: 100%; margin: 4px 0; padding: 6px 8px; font-size: .82rem; }
+
 .spin { display: inline-block; animation: spin 1.1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

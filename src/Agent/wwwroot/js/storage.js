@@ -62,9 +62,17 @@ export const storage = {
     write('toolsOff', list.length ? JSON.stringify(list) : '');
   },
 
+  /** The model analyze_result runs on; '' = the server's default (GET /api/config). */
+  get analysisModel() { return read('analysisModel'); },
+  set analysisModel(v) { write('analysisModel', v); },
+
+  /** "Hand large results to an analysis model" switched off (on by default). */
+  get analysisOff() { return read('analysisOff') === '1'; },
+  set analysisOff(v) { write('analysisOff', v ? '1' : ''); },
+
   /** Wipe everything this app stored. Called on logout. */
   clear() {
-    for (const k of ['orKey', 'model', 'hostname', 'email', 'allowChanges', 'toolsOff']) write(k, '');
+    for (const k of ['orKey', 'model', 'hostname', 'email', 'allowChanges', 'toolsOff', 'analysisModel', 'analysisOff']) write(k, '');
   },
 
   /** Wipe only the credential-ish bits, keep UI preferences. */

@@ -71,6 +71,20 @@ public sealed record ServerOptions
     public int TasksPerProfile { get; init; } = 10;
     public int TaskRunRetention { get; init; } = 50;
 
+    /// <summary>
+    /// <c>ANALYSIS_MODEL</c>: the default model for <c>analyze_result</c> (large tool results), offered to the
+    /// browser in <c>GET /api/config</c>; the user may pick another. Default <c>openai/gpt-6-luna</c>.
+    /// </summary>
+    public string AnalysisModel { get; init; } = DefaultAnalysisModel;
+
+    public const string DefaultAnalysisModel = "openai/gpt-6-luna";
+
+    /// <summary>
+    /// <c>TASK_ANALYSIS_MODEL</c>: the analysis model for scheduled runs, billed to the task key. Defaults to
+    /// <see cref="AnalysisModel"/>; <c>off</c> (or <c>none</c>) = no artifacts in runs, results clamped as before.
+    /// </summary>
+    public string? TaskAnalysisModel { get; init; } = DefaultAnalysisModel;
+
     /// <summary>OpenRouter's chat-completions endpoint by default; tests point it at a fake.</summary>
     public Uri LlmBaseUrl { get; init; } = new("https://openrouter.ai/api/v1/");
 
@@ -103,6 +117,14 @@ public sealed record ServerOptions
             ? new Uri(rawLlm.EndsWith('/') ? rawLlm : rawLlm + "/", UriKind.Absolute)
             : new Uri("https://openrouter.ai/api/v1/");
 
+        var analysisModel = config["ANALYSIS_MODEL"] is { Length: > 0 } rawAnalysis ? rawAnalysis.Trim() : DefaultAnalysisModel;
+        var taskAnalysisModel = config["TASK_ANALYSIS_MODEL"]?.Trim() switch
+        {
+            null or "" => analysisModel,
+            "off" or "none" => null,
+            var model => model,
+        };
+
         var options = new ServerOptions
         {
             BrowserOnly = browserOnly,
@@ -125,6 +147,8 @@ public sealed record ServerOptions
             TasksPerProfile = Int(config, "TASKS_PER_PROFILE", 10),
             TaskRunRetention = Int(config, "TASK_RUN_RETENTION", 50),
             LlmBaseUrl = llm,
+            AnalysisModel = analysisModel,
+            TaskAnalysisModel = taskAnalysisModel,
         };
 
         if (logger is not null)

@@ -9,6 +9,8 @@
  * be unit-tested with recorded SSE fixtures under dev/test/.
  */
 
+import { isArtifactStub } from './artifacts.js';
+
 export const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 export const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 export const MAX_TOOL_ROUNDS = 15;
@@ -281,18 +283,28 @@ export function sessionAccounts(sessionInfo) {
  * `disabledCategories` are the tool groups switched off in the Tools menu, so
  * the model can say why it cannot do something instead of guessing.
  */
-export function buildSystemPrompt(sessionInfo, { now = new Date(), disabledCategories = [] } = {}) {
+export function buildSystemPrompt(sessionInfo, { now = new Date(), disabledCategories = [], artifacts = false } = {}) {
   const accounts = sessionAccounts(sessionInfo);
   const off = [...(disabledCategories || [])];
-  const offLines = off.length
-    ? ['', '# Switched-off tool groups', `- The user has switched these tool groups off in the Tools menu, so their tools are not available to you: ${off.join(', ')}. If a request needs one, say so and ask them to switch it back on.`]
-    : [];
+  const offLines = [
+    ...(off.length
+      ? ['', '# Switched-off tool groups', `- The user has switched these tool groups off in the Tools menu, so their tools are not available to you: ${off.join(', ')}. If a request needs one, say so and ask them to switch it back on.`]
+      : []),
+    ...(artifacts ? ['', ...ARTIFACT_PROMPT_LINES] : [])
+  ];
 
   if (accounts.length <= 1 && (!accounts[0] || accounts[0].role === 'User' || !accounts[0].role)) {
     return singleMailboxPrompt(accounts[0] || {}, now, offLines);
   }
   return multiAccountPrompt(accounts, now, offLines);
 }
+
+/** What the chat model is told about artifacts (analyze_result on). */
+export const ARTIFACT_PROMPT_LINES = [
+  '# Large results',
+  '- A tool result too large for this conversation comes back as {"artifact":"r1",…}: its size, first and last lines, and the small fields around it. The full result is kept outside your context.',
+  '- To answer from the whole of it (counts, top values, everything about one message or session, a time window), call analyze_result with the artifact handle and one focused question. Rely on its answer and evidence rather than guessing from the lines in the stub, and say when it reports partial evidence.'
+];
 
 function nowLine(now) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -471,7 +483,7 @@ export function isAnthropicModel(model) {
  * `messages` is never mutated; for Anthropic the system message is copied with
  * its text wrapped in a content part that carries the breakpoint.
  */
-export function buildRequestBody({ model, messages, tools, stream = true, maxTokens = 8192, sessionId = null }) {
+export function buildRequestBody({ model, messages, tools, stream = true, maxTokens = 8192, sessionId = null, reasoning = null, toolChoice = null }) {
   let sent = messages;
   const anthropic = isAnthropicModel(model);
   if (anthropic) {
@@ -486,8 +498,10 @@ export function buildRequestBody({ model, messages, tools, stream = true, maxTok
   const body = { model, messages: sent, stream, max_tokens: maxTokens };
   if (tools && tools.length) {
     body.tools = tools;
-    body.tool_choice = 'auto';
+    body.tool_choice = toolChoice || 'auto';
   }
+  // Only the analysis sub-agent sets these (subagent.js); the chat's body is unchanged.
+  if (reasoning) body.reasoning = { ...reasoning };
   if (anthropic) body.cache_control = { ...EPHEMERAL };
   // Sticky provider routing from the first request, not only after the first cache hit.
   if (sessionId) body.session_id = String(sessionId).slice(0, 256);
@@ -567,6 +581,8 @@ export function elideOldToolResults(messages, { threshold = ELIDE_THRESHOLD, kee
       continue;
     }
     if (m.role !== 'tool' || typeof m.content !== 'string' || m.content.length <= threshold) continue;
+    // An artifact stub is already small and is the model's only handle on the artifact.
+    if (isArtifactStub(m.content)) continue;
     const name = names.get(m.tool_call_id) || 'a tool';
     m.content = `[earlier result of ${name} (${m.content.length.toLocaleString('en-US')} chars) omitted to save context; call the tool again if you need it]`;
     n++;
@@ -589,6 +605,8 @@ export async function streamCompletion({
   tools,
   signal,
   sessionId,
+  reasoning: reasoningOption = null,
+  toolChoice = null,
   onContent,
   onReasoning,
   onToolCallProgress,
@@ -598,7 +616,7 @@ export async function streamCompletion({
 }) {
   if (!apiKey) throw new LlmError('No OpenRouter API key.', { code: 'bad_key' });
 
-  const body = buildRequestBody({ model, messages, tools, sessionId });
+  const body = buildRequestBody({ model, messages, tools, sessionId, reasoning: reasoningOption, toolChoice });
 
   let res;
   try {
@@ -709,10 +727,16 @@ export async function streamCompletion({
  *   onContent(chunk, full)        streamed text
  *   onAssistantEnd(full)          assistant message finished
  *   onToolStart(call)             {id, name, args, argsText}
- *   onToolEnd(call, result)       result = {isError, content}
+ *   onToolEnd(call, result, artifact)  result = {isError, content}; artifact = the
+ *                                 artifact the result was kept as (artifacts.js), or null
  *   onNotice(text, kind)          non-fatal information for the user
  *   onUsage(round, total)         token usage after each request (normaliseUsage
  *                                 shape; total adds `requests`)
+ *
+ * `localTools` ({ name: async (args, call) => result }) run in the browser
+ * instead of `callTool` (analyze_result). With an `artifacts` store
+ * (artifacts.js), a result over its threshold is kept there and the model gets
+ * a stub; without one every result is clamped as before.
  *
  * Before the first request, large tool results from older turns are replaced
  * with stubs (elideOldToolResults; `elide: false` turns that off). Resolves
@@ -726,6 +750,8 @@ export async function runTurn({
   model,
   signal,
   callTool,
+  localTools = null,
+  artifacts = null,
   maxToolRounds = MAX_TOOL_ROUNDS,
   url,
   sessionId,
@@ -810,15 +836,19 @@ export async function runTurn({
         result = { isError: true, content: `${parsed.error} Re-issue the call with valid JSON arguments.` };
       } else {
         try {
-          result = await callTool(call.name, call.args);
+          const local = localTools && Object.prototype.hasOwnProperty.call(localTools, call.name) ? localTools[call.name] : null;
+          result = local ? await local(call.args, call) : await callTool(call.name, call.args);
         } catch (e) {
           if (e && e.name === 'AbortError') throw e;
           result = { isError: true, content: `Tool call failed: ${e.message}` };
         }
       }
 
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: clampToolResult(result.content) });
-      if (ui.onToolEnd) ui.onToolEnd(call, result);
+      const kept = artifacts
+        ? artifacts.capture(call.name, call.args, result, clampToolResult)
+        : { content: clampToolResult(result.content), artifact: null };
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: kept.content });
+      if (ui.onToolEnd) ui.onToolEnd(call, result, kept.artifact);
     }
 
     // Stop pressed while tools were running: finish them (done above), then halt.
