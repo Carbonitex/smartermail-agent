@@ -159,6 +159,17 @@
           <p class="popover-title">Tool groups sent to the model</p>
           <div id="tools-groups" class="tools-groups"></div>
           <p id="tools-count" class="hint tools-count"></p>
+          <fieldset class="tools-group analysis-group">
+            <legend>Large results</legend>
+            <label class="tools-option">
+              <input id="f-analysis" type="checkbox" checked>
+              <span>Hand large results to an analysis model</span>
+            </label>
+            <label class="hint" for="f-analysis-model">Analysis model (any model with tool calling)</label>
+            <input id="f-analysis-model" class="analysis-model" type="text" list="analysis-models" spellcheck="false" autocomplete="off">
+            <datalist id="analysis-models"></datalist>
+            <p id="analysis-hint" class="hint"></p>
+          </fieldset>
         </div>
       </div>
       <div class="tools-menu">

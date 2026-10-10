@@ -239,7 +239,8 @@ function renderEditor(task) {
       'Nothing is allowed unless ticked here. Mail it reads can contain instructions meant for it; it is told to ignore them, ' +
       'and the server refuses any change not on this list. Try a test run first.'),
     field('At most this many changes per run', maxWrites),
-    field('Model', model),
+    field('Model', model, profile.taskLimits().analysisModel
+      ? `Tool results over 20,000 characters are handed to a second model, ${profile.taskLimits().analysisModel}, billed to the same task key.` : ''),
     field('Email the result to you?', email),
     enabled.label,
     error);

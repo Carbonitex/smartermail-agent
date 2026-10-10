@@ -31,10 +31,13 @@ public sealed class OpenRouterClient(HttpClient http, ServerOptions options, ILo
         string? Content, IReadOnlyList<ToolCall> ToolCalls, string? FinishReason, long PromptTokens, long CompletionTokens,
         long CachedTokens = 0, long CacheWriteTokens = 0, double Cost = 0);
 
+    /// <param name="reasoningEffort">OpenRouter's <c>reasoning.effort</c>; only the analysis sub-agent sets it.</param>
+    /// <param name="toolChoice">Overrides <c>tool_choice: auto</c> (the sub-agent's final answer sends <c>none</c>).</param>
     public async Task<Completion> CompleteAsync(
-        string apiKey, string model, JsonArray messages, JsonArray? tools, CancellationToken ct, string? sessionId = null)
+        string apiKey, string model, JsonArray messages, JsonArray? tools, CancellationToken ct, string? sessionId = null,
+        string? reasoningEffort = null, string? toolChoice = null)
     {
-        var body = BuildBody(model, messages, tools, sessionId);
+        var body = BuildBody(model, messages, tools, sessionId, reasoningEffort, toolChoice);
 
         for (var attempt = 1; ; attempt++)
         {
@@ -64,7 +67,8 @@ public sealed class OpenRouterClient(HttpClient http, ServerOptions options, ILo
     /// the top-level automatic one, which follows the end of the conversation round by round. Two of Anthropic's
     /// four slots. Nobody else sees either. <paramref name="messages"/> is not modified.
     /// </summary>
-    public static JsonObject BuildBody(string model, JsonArray messages, JsonArray? tools, string? sessionId = null)
+    public static JsonObject BuildBody(
+        string model, JsonArray messages, JsonArray? tools, string? sessionId = null, string? reasoningEffort = null, string? toolChoice = null)
     {
         var anthropic = IsAnthropicModel(model);
         var sent = (JsonArray)messages.DeepClone();
@@ -92,8 +96,10 @@ public sealed class OpenRouterClient(HttpClient http, ServerOptions options, ILo
         if (tools is { Count: > 0 })
         {
             body["tools"] = tools.DeepClone();
-            body["tool_choice"] = "auto";
+            body["tool_choice"] = toolChoice ?? "auto";
         }
+        if (!string.IsNullOrEmpty(reasoningEffort))
+            body["reasoning"] = new JsonObject { ["effort"] = reasoningEffort };
         if (anthropic)
             body["cache_control"] = Ephemeral();
         // Sticky provider routing from the first request, not only after the first cache hit.

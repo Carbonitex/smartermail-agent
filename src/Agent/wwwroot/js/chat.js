@@ -23,6 +23,11 @@ import {
   runTurn, addUsage, toolsToOpenAI, buildSystemPrompt, fetchToolModels, MAX_TOOL_ROUNDS,
   roleLabel, hasMailbox, toolGroups, filterToolsByCategory, sessionAccounts
 } from './llm.js';
+import { ArtifactStore, ANALYZE_RESULT_TOOL, ARTIFACT_THRESHOLD, DEFAULT_ANALYSIS_MODEL, formatSize } from './artifacts.js';
+import { runAnalyzeResult } from './subagent.js';
+
+/** analyze_result as sent to OpenRouter: one object, so every request serialises it identically. */
+const ANALYZE_RESULT_FUNCTION = toolsToOpenAI([ANALYZE_RESULT_TOOL])[0];
 
 /* ------------------------------------------------------------------ state */
 
@@ -38,6 +43,8 @@ const state = {
   messages: [],         // OpenAI message array, in memory only
   conversationId: null, // random id per conversation: OpenRouter's session_id (sticky routing keeps its cache warm)
   usage: null,          // token usage summed over this conversation (llm.js addUsage shape), for a later UI
+  artifacts: new ArtifactStore(),   // large tool results of this conversation, in this tab's memory only (artifacts.js)
+  analysisDefaults: { model: DEFAULT_ANALYSIS_MODEL, threshold: ARTIFACT_THRESHOLD },   // GET /api/config "analysis"
   busy: false,
   abort: null,          // AbortController for the active turn
   queue: [],            // messages typed while a turn is streaming
@@ -115,6 +122,10 @@ const el = {
   mcpCopy: $('mcp-copy'),
   mcpRevoke: $('mcp-revoke'),
   modelSelect: $('model-select'),
+  analysisOn: $('f-analysis'),
+  analysisModel: $('f-analysis-model'),
+  analysisModels: $('analysis-models'),
+  analysisHint: $('analysis-hint'),
   btnNewChat: $('btn-new-chat'),
   btnLogout: $('btn-logout'),
 
@@ -166,7 +177,7 @@ async function init() {
   el.key.value = storage.openRouterKey;
   state.disabled = storage.disabledCategories;
 
-  await profile.loadConfig();
+  applyAnalysisConfig(await profile.loadConfig());
   await initProfileUi(profileHooks);
   initTasks(taskHooks);
   await loadResumeConfig();
@@ -232,7 +243,9 @@ function currentSettings() {
     openRouterKey: storage.openRouterKey,
     model: el.modelSelect.value || storage.model || DEFAULT_MODEL,
     toolsOff: [...state.disabled],
-    allowChanges: !!state.allowChangesDefault
+    allowChanges: !!state.allowChangesDefault,
+    analysis: analysisOn(),
+    analysisModel: storage.analysisModel
   };
 }
 
@@ -249,6 +262,9 @@ function applyProfileSettings(settings) {
   if (settings.model) storage.model = settings.model;
   if (Array.isArray(settings.toolsOff)) { state.disabled = new Set(settings.toolsOff); storage.disabledCategories = state.disabled; }
   if (typeof settings.allowChanges === 'boolean') state.allowChangesDefault = settings.allowChanges;
+  if (typeof settings.analysis === 'boolean') storage.analysisOff = !settings.analysis;
+  if (typeof settings.analysisModel === 'string') storage.analysisModel = settings.analysisModel;
+  renderAnalysisSettings();
 }
 
 const profileHooks = {
@@ -728,10 +744,11 @@ function renderServerUi() {
   refreshTasksBadge();
 }
 
-/** A new conversation: a fresh OpenRouter session id and usage totals. */
+/** A new conversation: a fresh OpenRouter session id, usage totals and artifact store. */
 function resetConversation() {
   state.conversationId = null;
   state.usage = null;
+  state.artifacts = new ArtifactStore({ threshold: state.analysisDefaults.threshold });
 }
 
 function conversationId() {
@@ -745,7 +762,7 @@ function conversationId() {
 
 /** The system prompt for the current accounts and Tools-menu selection. */
 function systemPrompt() {
-  return buildSystemPrompt(state.session, { disabledCategories: presentDisabled() });
+  return buildSystemPrompt(state.session, { disabledCategories: presentDisabled(), artifacts: analysisOn() });
 }
 
 /** Swap the system prompt in place: the conversation after it is untouched. */
@@ -1293,6 +1310,180 @@ function passkeyMessage(err, what) {
   return (err && err.message) || `${what} failed.`;
 }
 
+/* ------------------------------------------------- large results (analysis) */
+
+/*
+ * Results over the threshold stay in this tab (artifacts.js); the chat model
+ * gets a stub and asks analyze_result (subagent.js), which runs a second model
+ * with the user's key. The setting lives in sessionStorage, and in the profile
+ * when there is one.
+ */
+
+/** GET /api/config's `analysis` block, when the server sends one. */
+function applyAnalysisConfig(config) {
+  const a = config && config.analysis;
+  if (a && typeof a.defaultModel === 'string' && a.defaultModel) state.analysisDefaults.model = a.defaultModel;
+  if (a && Number.isFinite(a.artifactThresholdChars) && a.artifactThresholdChars > 0) state.analysisDefaults.threshold = a.artifactThresholdChars;
+  state.artifacts = new ArtifactStore({ threshold: state.analysisDefaults.threshold });
+  renderAnalysisSettings();
+}
+
+function analysisOn() { return !storage.analysisOff; }
+function analysisModel() { return storage.analysisModel || state.analysisDefaults.model; }
+
+/** The tools sent with a turn: the server's (after the Tools menu), plus analyze_result at the end when on. */
+function turnTools() {
+  return analysisOn() && state.tools.length ? [...state.tools, ANALYZE_RESULT_FUNCTION] : state.tools;
+}
+
+function renderAnalysisSettings() {
+  if (!el.analysisOn) return;
+  el.analysisOn.checked = analysisOn();
+  el.analysisModel.value = storage.analysisModel;
+  el.analysisModel.placeholder = state.analysisDefaults.model;
+  el.analysisModel.disabled = !analysisOn();
+  el.analysisHint.textContent =
+    `Results over ${state.analysisDefaults.threshold.toLocaleString('en-US')} characters stay in this tab; the chat model gets a summary ` +
+    'and asks the analysis model about them, with your OpenRouter key. Off: such results are cut at 60,000 characters.';
+}
+
+function wireAnalysisSettings() {
+  if (!el.analysisOn) return;
+  el.analysisOn.addEventListener('change', () => {
+    storage.analysisOff = !el.analysisOn.checked;
+    renderAnalysisSettings();
+    refreshSystemPrompt();
+    syncProfileSettings();
+  });
+  el.analysisModel.addEventListener('change', () => {
+    storage.analysisModel = el.analysisModel.value.trim();
+    renderAnalysisSettings();
+    syncProfileSettings();
+  });
+}
+
+/** analyze_result, run here: the sub-agent's calls and cost go on the tool card. */
+async function analyzeLocally(args, call, cards, signal) {
+  const ref = cards.get(call.id);
+  const panel = ref ? addAnalysisPanel(ref) : null;
+  const r = await runAnalyzeResult({
+    store: state.artifacts,
+    args,
+    apiKey: storage.openRouterKey,
+    model: analysisModel(),
+    signal,
+    url: completionsUrl(),
+    sessionId: `${conversationId()}-analysis`,
+    ui: {
+      onStep: (step) => panel && panel.step(step),
+      onUsage: (round, total) => {
+        state.usage = addUsage(state.usage, round);
+        if (panel) panel.usage(total);
+      }
+    }
+  });
+  if (panel) panel.finish(r);
+  return { isError: r.isError, content: r.content };
+}
+
+/** The nested view on an analyze_result card: model, rounds, tokens, cost, and each operator call. */
+function addAnalysisPanel(ref) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tool-section analysis-panel';
+  const label = document.createElement('div');
+  label.className = 'tool-label';
+  label.textContent = 'Analysis';
+  const meta = document.createElement('div');
+  meta.className = 'analysis-meta';
+  meta.textContent = `${analysisModel()} · working…`;
+  const list = document.createElement('div');
+  list.className = 'analysis-steps';
+  wrap.append(label, meta, list);
+  ref.body.appendChild(wrap);
+  const rows = new Map();
+  let totals = null;
+
+  const metaText = (r) => {
+    const parts = [r ? r.model : analysisModel()];
+    if (r) parts.push(r.mode === 'direct' ? 'read whole' : `${r.rounds} round${r.rounds === 1 ? '' : 's'}, ${r.steps.length} call${r.steps.length === 1 ? '' : 's'}`);
+    if (totals) {
+      parts.push(`${compactCount(totals.promptTokens)} in / ${compactCount(totals.completionTokens)} out`);
+      if (totals.cost) parts.push(formatCost(totals.cost));
+    }
+    if (r && r.partial) parts.push('partial');
+    return parts.join(' · ');
+  };
+
+  return {
+    step(s) {
+      let row = rows.get(s.id);
+      if (!row) {
+        row = document.createElement('details');
+        row.className = 'analysis-step';
+        row.appendChild(document.createElement('summary'));
+        row.appendChild(document.createElement('pre')).className = 'tool-pre';
+        rows.set(s.id, row);
+        list.appendChild(row);
+      }
+      const first = s.done ? String(s.text).split('\n')[0] : 'running…';
+      row.classList.toggle('error', !!s.isError);
+      row.firstChild.textContent = `${s.op} ${summarise(s.args)} → ${first.length > 90 ? first.slice(0, 90) + '…' : first}`;
+      row.lastChild.textContent = s.done ? s.text : '';
+      scroll();
+    },
+    usage(total) { totals = total; meta.textContent = `${metaText(null)} · working…`; },
+    finish(r) {
+      totals = r.usage || totals;
+      meta.textContent = metaText(r);
+      const summary = ref.head.querySelector('.tool-summary');
+      if (summary && totals && totals.cost) summary.textContent = `${summary.textContent} · ${formatCost(totals.cost)}`;
+    }
+  };
+}
+
+function compactCount(n) {
+  if (!Number.isFinite(n)) return '?';
+  if (n < 1000) return String(n);
+  if (n < 1000000) return `${(n / 1000).toFixed(n < 10000 ? 1 : 0).replace(/\.0$/, '')}k`;
+  return `${(n / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
+}
+
+function formatCost(c) { return `$${c < 0.01 ? c.toFixed(4) : c.toFixed(3)}`; }
+
+/**
+ * The original tool's card: an "artifact r3 · 3.0 MB" badge, and in its
+ * details a download of the full result (a Blob URL made on click, never uploaded).
+ */
+function markArtifact(ref, artifact) {
+  const badge = document.createElement('span');
+  badge.className = 'tool-artifact';
+  badge.textContent = `artifact ${artifact.handle} · ${formatSize(artifact.chars)}`;
+  badge.title = 'The full result is kept in this tab; the model got a summary and can ask analyze_result about it.';
+  ref.head.insertBefore(badge, ref.head.querySelector('.tool-status'));
+
+  const line = document.createElement('div');
+  line.className = 'tool-section artifact-download';
+  const a = document.createElement('a');
+  a.href = '#';
+  a.textContent = `Download the full result (${formatSize(artifact.chars)}${artifact.truncated ? ', truncated' : ''})`;
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const kept = state.artifacts.get(artifact.handle);
+    if (kept !== artifact) { a.replaceWith(document.createTextNode('This result is no longer kept in this tab.')); return; }
+    const blob = new Blob([kept.body], { type: kept.kind === 'records' ? 'application/json' : 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${kept.tool}-${kept.handle}.${kept.kind === 'records' ? 'json' : 'txt'}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  });
+  line.appendChild(a);
+  ref.body.appendChild(line);
+}
+
 /* ------------------------------------------------------------ tools menu */
 
 function renderToolsMenu() {
@@ -1502,6 +1693,13 @@ function loadModels() {
   setModelOptions([{ id: current, name: current }], current);
   fetchToolModels()
     .then((models) => {
+      if (el.analysisModels) {
+        el.analysisModels.replaceChildren(...models.map((m) => {
+          const o = document.createElement('option');
+          o.value = m.id;
+          return o;
+        }));
+      }
       if (!models.some((m) => m.id === current)) models.unshift({ id: current, name: current + ' (current)' });
       setModelOptions(models, current);
     })
@@ -1521,6 +1719,7 @@ function setModelOptions(models, selected) {
 }
 
 function wireChat() {
+  wireAnalysisSettings();
   el.modelSelect.addEventListener('change', () => { storage.model = el.modelSelect.value; syncProfileSettings(); });
 
   el.btnNewChat.addEventListener('click', () => {
@@ -1540,6 +1739,7 @@ function wireChat() {
     const wasProfile = !!(state.session && state.session.profile);
     try { await api.logout(); } catch { /* best effort */ }
     storage.clear();
+    renderAnalysisSettings();
     forgetDevice();   // the server revoked the tokens; the saved copy is dead anyway
     profile.lock();
     await profile.forgetWarm();
@@ -1685,7 +1885,7 @@ function addToolCard(call) {
   return { card, head, body };
 }
 
-function finishToolCard(ref, result) {
+function finishToolCard(ref, result, artifact = null) {
   const status = ref.head.querySelector('.tool-status');
   if (result.isError) {
     ref.card.classList.add('error');
@@ -1706,6 +1906,7 @@ function finishToolCard(ref, result) {
   }
   const text = String(result.content ?? '');
   ref.body.appendChild(section('Result', prettyJson(text)));
+  if (artifact) markArtifact(ref, artifact);
   const summary = ref.head.querySelector('.tool-summary');
   if (!result.isError) summary.textContent = summary.textContent || `${text.length} chars`;
   scroll();
@@ -1787,7 +1988,7 @@ async function drive() {
   try {
     await runTurn({
       messages: state.messages,
-      tools: state.tools,
+      tools: turnTools(),
       apiKey: storage.openRouterKey,
       model: el.modelSelect.value || storage.model || DEFAULT_MODEL,
       signal: controller.signal,
@@ -1795,6 +1996,9 @@ async function drive() {
       url: completionsUrl(),
       sessionId: conversationId(),
       callTool: (name, args) => api.callTool(name, args),
+      // analyze_result never reaches the server: it runs here, on this tab's artifacts.
+      localTools: { [ANALYZE_RESULT_TOOL.name]: (args, call) => analyzeLocally(args, call, cards, controller.signal) },
+      artifacts: analysisOn() ? state.artifacts : null,
       ui: {
         onUsage(round) { state.usage = addUsage(state.usage, round); },
         onAssistantStart() { bubble = null; buffer = ''; },
@@ -1808,9 +2012,9 @@ async function drive() {
           bubble = null;
         },
         onToolStart(call) { cards.set(call.id, addToolCard(call)); },
-        onToolEnd(call, result) {
+        onToolEnd(call, result, artifact) {
           const ref = cards.get(call.id);
-          if (ref) finishToolCard(ref, result);
+          if (ref) finishToolCard(ref, result, artifact);
           cards.delete(call.id);
         },
         onNotice(text, kind) { addNotice(text, kind); }

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using SmarterMailAgent.Auth;
 using SmarterMailAgent.Llm;
+using SmarterMailAgent.Llm.Artifacts;
 using SmarterMailAgent.Mcp;
 using SmarterMailAgent.Profiles;
 using SmarterMailAgent.Server;
@@ -98,7 +99,8 @@ public sealed class TaskRunner(
                         return new AgentLoop.ToolResult(ToolInvoker.Flatten(outcome.Result),
                             outcome.Status != ToolDispatcher.Status.Ok || (outcome.Result.IsError ?? false), outcome.Account, outcome.Simulated);
                     },
-                    options.TaskMaxToolRounds, timeout.Token, sessionId: $"sma-task-run-{runId}");
+                    options.TaskMaxToolRounds, timeout.Token, sessionId: $"sma-task-run-{runId}",
+                    analysis: options.TaskAnalysisModel is { } analysisModel ? new ArtifactAnalysis(analysisModel) : null);
 
                 (status, code) = result.Stop switch
                 {

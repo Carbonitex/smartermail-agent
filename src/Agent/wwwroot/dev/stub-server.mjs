@@ -112,6 +112,16 @@ const TOOLS = [
     }
   },
   {
+    name: 'search_log_files',
+    description: 'Search server log files by type and date (the stub returns ~300 KB of SMTP log, so the result becomes an artifact).',
+    scope: 'SysAdmin', category: 'Monitoring', write: false,
+    inputSchema: {
+      type: 'object',
+      properties: { type: { type: 'string' }, startDate: { type: 'string' }, endDate: { type: 'string' }, search: { type: 'string' } },
+      required: ['type']
+    }
+  },
+  {
     name: 'delete_domain',
     description: 'Delete a domain and all of its data from the server. WRITE TOOL.',
     scope: 'SysAdmin', category: 'Domains', write: true,
@@ -203,6 +213,15 @@ function runTool(name, args, session) {
           ]
         }, null, 2)
       };
+    case 'search_log_files': {
+      const lines = [];
+      for (let i = 0; i < 4000; i++) {
+        const t = `${String(Math.floor(i / 180) % 24).padStart(2, '0')}:${String(Math.floor(i / 3) % 60).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.${String(i % 1000).padStart(3, '0')}`;
+        lines.push(`${t} [${1000 + Math.floor(i / 6)}] ${i % 6 === 0 ? `Connection from 192.0.2.${i % 200 + 1}` : i % 6 === 5 ? `rsp: ${i % 77 === 5 ? 550 : 250} ${i % 77 === 5 ? 'Mailbox unavailable' : 'OK'}` : `cmd: RCPT TO:<user${i}@example.com>`}`);
+      }
+      const content = lines.join('\r\n') + '\r\n';
+      return { isError: false, content: JSON.stringify({ success: true, logType: args.type || 'smtpLog', totalChars: content.length, hasMore: false, content }) };
+    }
     case 'delete_domain':
       return { isError: false, content: JSON.stringify({ success: true, deleted: args.domain }) };
     case 'enable_dkim':
@@ -763,6 +782,42 @@ async function fakeCompletions(res, body, s) {
 
   res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
   res.write(': OPENROUTER PROCESSING\n\n');
+
+  // The analysis sub-agent (subagent.js): count once, then answer from the count.
+  const system = String((messages[0] && messages[0].content) || '');
+  if (system.startsWith('You analyse')) {
+    const toolMsg = [...messages].reverse().find((m) => m.role === 'tool');
+    if (Array.isArray(body.tools) && !toolMsg && body.tool_choice !== 'none') {
+      sse(res, delta({ role: 'assistant', tool_calls: [{ index: 0, id: 'call_count', type: 'function', function: { name: 'artifact_count', arguments: JSON.stringify({ pattern: 'rsp: (\\d{3})', by: '1' }) } }] }));
+      sse(res, delta({}, 'tool_calls'));
+    } else {
+      const first = toolMsg ? String(toolMsg.content).split('\n').slice(0, 3).join('; ') : 'read the whole artifact';
+      sse(res, delta({ role: 'assistant', content: `From the operators: ${first}.\nEvidence: see the counts above.` }));
+      sse(res, delta({}, 'stop'));
+    }
+    sse(res, { id: 'gen-stub', usage: { prompt_tokens: 4200, completion_tokens: 60, cost: 0.00045 }, choices: [] });
+    res.write('data: [DONE]\n\n');
+    return res.end();
+  }
+
+  // Large results: search the log (an artifact), then ask analyze_result about it.
+  if (/\blogs?\b/i.test(text) && sysadmin) {
+    const stubMsg = [...messages].reverse().find((m) => m.role === 'tool' && String(m.content).startsWith('{"artifact":'));
+    if (!used.has('search_log_files')) {
+      sse(res, delta({ role: 'assistant', tool_calls: [{ index: 0, id: 'call_log', type: 'function', function: { name: 'search_log_files', arguments: JSON.stringify(withAccount({ type: 'smtpLog', startDate: '2026-10-09', endDate: '2026-10-09', search: '' }, sysadmin)) } }] }));
+      sse(res, delta({}, 'tool_calls'));
+    } else if (!used.has('analyze_result') && stubMsg) {
+      const handle = JSON.parse(stubMsg.content).artifact;
+      sse(res, delta({ role: 'assistant', tool_calls: [{ index: 0, id: 'call_analyze', type: 'function', function: { name: 'analyze_result', arguments: JSON.stringify({ artifact: handle, question: 'How many responses of each SMTP code?' }) } }] }));
+      sse(res, delta({}, 'tool_calls'));
+    } else {
+      const last = [...messages].reverse().find((m) => m.role === 'tool');
+      sse(res, delta({ role: 'assistant', content: `The analysis says: ${String(last ? last.content : '').split('\n')[0]}` }));
+      sse(res, delta({}, 'stop'));
+    }
+    res.write('data: [DONE]\n\n');
+    return res.end();
+  }
 
   const wantsSend = /send/i.test(text) && !used.has('send_email');
   const wantsSpool = /spool|stuck/i.test(text);
