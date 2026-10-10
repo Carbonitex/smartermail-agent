@@ -69,8 +69,15 @@ internal sealed class DownableAuth : HttpMessageHandler
 
     public bool Down { get; set; }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
-        Down ? throw new HttpRequestException("connection refused") : _inner.SendAsync(request, ct);
+    /// <summary>The mail server answers this late (honouring cancellation).</summary>
+    public TimeSpan? Delay { get; set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        if (Delay is { } delay)
+            await Task.Delay(delay, ct);
+        return Down ? throw new HttpRequestException("connection refused") : await _inner.SendAsync(request, ct);
+    }
 
     public SmarterMailAuth Auth() => new(NullLogger<SmarterMailAuth>.Instance, new HttpClient(this), TimeSpan.FromSeconds(2));
 }
@@ -187,6 +194,44 @@ public sealed class ApprovalGateTests : IClassFixture<CatalogFixture>
         Assert.Equal(ToolGate.Decision.Run, gate.Admit("send_email", a, null));
         Assert.Equal(ToolGate.Decision.OverBudget, gate.Admit("send_email", a, null));
         Assert.Equal(2, gate.ProposalsAdmitted);
+    }
+
+    /// <summary>Mail that leaves the server needs the passkey step-up; the rule is pinned here.</summary>
+    [Fact]
+    public void Outbound_mail_tools_need_a_passkey()
+    {
+        var catalog = _fixture.Catalog;
+        var sending = catalog.Entries.Where(e => TaskProposalSink.SendsMail(e.Name)).Select(e => e.Name).Order(StringComparer.Ordinal);
+        Assert.Equal(
+        [
+            "create_content_filter", "create_content_filter_simple", "forward_email", "new_or_update_calendar_event", "reply_to_email",
+            "respond_to_meeting", "send_draft", "send_email", "send_email_with_attachments", "update_content_filter",
+        ], sending);
+
+        // Every name in the list is a real mailbox write (a rename would otherwise silently drop it).
+        foreach (var name in TaskProposalSink.OutboundMailTools)
+        {
+            Assert.True(catalog.TryGet(name, out var entry), name);
+            Assert.True(entry.Write, name);
+            Assert.Equal(ToolScope.Mailbox, entry.Scope);
+        }
+
+        var none = new TaskApprovals();
+        Assert.True(catalog.TryGet("send_email", out var send));
+        Assert.True(TaskProposalSink.NeedsPasskey(send, none));
+        Assert.True(catalog.TryGet("block_senders", out var block));
+        Assert.False(TaskProposalSink.NeedsPasskey(block, none));
+        Assert.True(catalog.TryGet("move_emails", out var move));
+        Assert.False(TaskProposalSink.NeedsPasskey(move, none));
+    }
+
+    [Fact]
+    public void Client_supplied_ids_are_logged_only_when_well_formed()
+    {
+        Assert.Equal("run-1_A", SmarterMailAgent.Controllers.ApprovalsController.LoggableId("run-1_A"));
+        Assert.Equal("(malformed)", SmarterMailAgent.Controllers.ApprovalsController.LoggableId("x\nFAKE LOG LINE"));
+        Assert.Equal("(malformed)", SmarterMailAgent.Controllers.ApprovalsController.LoggableId(new string('a', 65)));
+        Assert.Equal("(malformed)", SmarterMailAgent.Controllers.ApprovalsController.LoggableId(""));
     }
 
     [Fact]
@@ -758,6 +803,133 @@ public sealed class ApprovalQueueTests : IDisposable
     }
 
     [Fact]
+    public async Task A_slow_mail_server_while_restoring_the_account_leaves_it_pending()
+    {
+        var p = await CreateProfileAsync();
+        var taskId = await CreateTaskAsync(p);
+        var id = (await ProposeAsync(p, taskId, "block_senders", BlockArgs)).ProposalId!;
+        var hash = HashOf(p.Mailbox, "block_senders", BlockArgs);
+
+        var runtime = Service<ProfileRegistry>().Find(p.ProfileId)!;
+        await runtime.Accounts.FindById(p.Mailbox.Id)!.ForgetAsync();
+        runtime.Accounts.Remove(p.Mailbox.Id);
+        _auth.Delay = TimeSpan.FromSeconds(30);             // the refresh outlasts the executor's budget
+        var executor = Service<ProposalExecutor>();
+        executor.RestoreTimeout = TimeSpan.FromMilliseconds(200);
+
+        var execution = await executor.ExecuteAsync(p.ProfileId, id, hash);
+        Assert.Equal((ProposalExecutor.Kind.Unavailable, "ACCOUNT_UNAVAILABLE"), (execution.Kind, execution.ErrorCode));
+        var row = Row(p, id);
+        Assert.Equal(ProposalStore.Pending, row.Status);
+        Assert.Null(row.ErrorCode);
+        Assert.NotNull(row.Payload);
+        Assert.Equal(0, _mail.Count("block-senders"));
+
+        // Once the server answers again the same approval goes through (the stored token was not spent).
+        _auth.Delay = null;
+        executor.RestoreTimeout = null;
+        await runtime.RestoreAsync(Service<AccountRestorer>(), 5, CancellationToken.None, new HashSet<string> { p.Mailbox.Id });
+        _mail.Attach(runtime.Accounts.FindById(p.Mailbox.Id)!);
+        var retried = await executor.ExecuteAsync(p.ProfileId, id, hash);
+        Assert.True(retried.Kind == ProposalExecutor.Kind.Executed, $"{retried.Kind} {retried.ErrorCode}");
+        Assert.Equal(1, _mail.Count("block-senders"));
+    }
+
+    [Fact]
+    public async Task A_duplicate_moves_to_the_newer_run_and_only_tightens_the_passkey()
+    {
+        var p = await CreateProfileAsync();
+        var taskId = await CreateTaskAsync(p, allowed: ["block_senders"], approval: ["block_senders"]);
+        var id = (await ProposeAsync(p, taskId, "block_senders", BlockArgs, runId: "run-a")).ProposalId!;
+        Assert.False(Row(p, id).NeedsPasskey);
+
+        // The task now asks for a passkey on every approval; the next run proposes the same call.
+        var (status, _) = await Send(HttpMethod.Put, $"/api/tasks/{taskId}", p.Cookie, new
+        {
+            name = "Tidy up", prompt = "x", cron = "0 7 * * *", timeZone = "UTC", accountIds = new[] { p.Mailbox.Id, p.Admin.Id },
+            allowedWrites = new[] { "block_senders" }, maxWrites = 5, model = "test/model",
+            approvals = new { writes = new[] { "block_senders" }, requirePasskey = true },
+        });
+        Assert.Equal(HttpStatusCode.OK, status);
+        var again = await ProposeAsync(p, taskId, "block_senders", BlockArgs, runId: "run-b");
+        Assert.Equal(id, again.ProposalId);
+        Assert.True(Row(p, id).NeedsPasskey);
+        Assert.Equal("run-b", Row(p, id).RunId);
+
+        // Relaxed again: a later duplicate never loosens it.
+        (status, _) = await Send(HttpMethod.Put, $"/api/tasks/{taskId}", p.Cookie, new
+        {
+            name = "Tidy up", prompt = "x", cron = "0 7 * * *", timeZone = "UTC", accountIds = new[] { p.Mailbox.Id, p.Admin.Id },
+            allowedWrites = new[] { "block_senders" }, maxWrites = 5, model = "test/model",
+            approvals = new { writes = new[] { "block_senders" }, requirePasskey = false },
+        });
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(id, (await ProposeAsync(p, taskId, "block_senders", BlockArgs, runId: "run-c")).ProposalId);
+        Assert.True(Row(p, id).NeedsPasskey);
+        Assert.Equal("run-c", Row(p, id).RunId);
+    }
+
+    [Fact]
+    public async Task Outbound_mail_proposals_need_a_passkey()
+    {
+        var p = await CreateProfileAsync();
+        var taskId = await CreateTaskAsync(p, allowed: ["send_email"], approval: ["send_email"]);
+        var id = (await ProposeAsync(p, taskId, "send_email", new { to = "someone@example.net", subject = "Hi", body = "Hello" })).ProposalId!;
+        Assert.True(Row(p, id).NeedsPasskey);
+    }
+
+    [Fact]
+    public async Task A_run_that_throws_after_proposing_still_records_its_proposals()
+    {
+        var p = await CreateProfileAsync();
+        var (keyStatus, _) = await Send(HttpMethod.Put, "/api/profile/task-key", p.Cookie, new { key = "sk-or-test" });
+        Assert.Equal(HttpStatusCode.OK, keyStatus);
+        var taskId = await CreateTaskAsync(p);
+        _llm.ToolCalls(("block_senders", new { senders = "spam@evil.example" })).Throw();
+
+        var scheduler = Service<TaskRunScheduler>();
+        var tasks = Service<TaskStore>();
+        Assert.True(scheduler.RunNow(tasks.Get(p.ProfileId, taskId)!, dryRun: false, out var runId));
+        await scheduler.WhenIdleAsync();
+
+        Assert.Equal("failed", tasks.Run(p.ProfileId, runId)!.Status);
+        Assert.Single(Service<ProposalStore>().List(p.ProfileId, "pending", null, 50));
+        Assert.Equal(1, Service<ProposalStore>().RunProposals(runId));
+    }
+
+    [Fact]
+    public async Task Decided_proposals_are_pruned_by_age_and_count()
+    {
+        var p = await CreateProfileAsync();
+        var taskId = await CreateTaskAsync(p, allowed: ["block_senders"], approval: ["block_senders"]);
+        var store = Service<ProposalStore>();
+        var ids = new List<string>();
+        for (var i = 0; i < 4; i++)
+            ids.Add((await ProposeAsync(p, taskId, "block_senders", new { senders = $"s{i}@evil.example" })).ProposalId!);
+        foreach (var id in ids.Take(3))
+            Assert.True(store.Deny(p.ProfileId, id));
+        var now = DataStore.Now();
+        var day = (long)TimeSpan.FromDays(1).TotalMilliseconds;
+        // ids[0] was decided 40 days ago; the others are recent. ids[3] stays pending however old it is.
+        Sql("UPDATE task_proposals SET decided_at = $t, created_at = $t WHERE id = $id", ("$t", now - 40 * day), ("$id", ids[0]));
+        Sql("UPDATE task_proposals SET created_at = $t WHERE id = $id", ("$t", now - 50 * day), ("$id", ids[3]));
+        Sql("UPDATE task_proposals SET created_at = $t WHERE id = $id", ("$t", now - 2000), ("$id", ids[1]));
+
+        Assert.Equal(1, ProposalMaintenance.Prune(store, now));
+        Assert.Null(store.Get(p.ProfileId, ids[0]));
+        Assert.NotNull(store.Get(p.ProfileId, ids[1]));
+        Assert.NotNull(store.Get(p.ProfileId, ids[3]));
+
+        // Beyond the newest K decided ones of the profile: the oldest go (ids[1] is older than ids[2]).
+        Assert.Equal(1, store.PruneDecided(now - 30 * day, keepPerProfile: 1));
+        Assert.Null(store.Get(p.ProfileId, ids[1]));
+        Assert.NotNull(store.Get(p.ProfileId, ids[2]));
+        Assert.Equal(ProposalStore.Pending, store.Get(p.ProfileId, ids[3])!.Status);
+        Assert.Equal(1, store.PruneDecided(now, keepPerProfile: 0));              // only ids[2]: pending is never pruned
+        Assert.NotNull(store.Get(p.ProfileId, ids[3]));
+    }
+
+    [Fact]
     public async Task Terminal_states_erase_the_payload_and_a_row_flipped_back_cannot_run_again()
     {
         var p = await CreateProfileAsync();
@@ -980,6 +1152,48 @@ public sealed class ApprovalQueueTests : IDisposable
         var path = Service<ServerOptions>().DatabasePath;
         var bytes = File.ReadAllBytes(path);
         return File.Exists(path + "-wal") ? bytes.Concat(File.ReadAllBytes(path + "-wal")).ToArray() : bytes;
+    }
+}
+
+/// <summary>Server mode with scheduled tasks off: the task, approval and probe endpoints answer their documented 404 code.</summary>
+public sealed class TasksDisabledTests
+{
+    [Theory]
+    [InlineData("TASKS_ENABLED", "false")]
+    [InlineData(null, null)]                          // no DATA_KEY
+    public async Task Task_endpoints_answer_404_not_500(string? key, string? value)
+    {
+        using var app = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("DATA_DIR", TestEnvironment.NewDataDir());
+            if (key is not null)
+            {
+                builder.UseSetting("DATA_KEY", Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+                builder.UseSetting(key, value);
+            }
+        });
+        var account = ResumeFixtures.NewAccount(new StubSmarterMail().Auth(), readOnly: false);
+        var session = app.Services.GetRequiredService<SessionStore>().Create(account);
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+
+        foreach (var (method, path, code) in new[]
+                 {
+                     (HttpMethod.Get, "/api/tasks", "TASKS_DISABLED"),
+                     (HttpMethod.Post, "/api/tasks/abc/run", "TASKS_DISABLED"),
+                     (HttpMethod.Get, "/api/tasks/runs", "TASKS_DISABLED"),
+                     (HttpMethod.Get, "/api/tasks/proposals", "TASKS_DISABLED"),
+                     (HttpMethod.Post, "/api/tasks/proposals/abc/deny", "TASKS_DISABLED"),
+                     (HttpMethod.Post, "/api/tasks/probe", "TRIGGERS_DISABLED"),
+                 })
+        {
+            using var request = new HttpRequestMessage(method, path);
+            request.Headers.Add("Cookie", $"{SessionStore.CookieName}={session.Id}");
+            if (method == HttpMethod.Post)
+                request.Content = JsonContent.Create(new { accountId = "x", tool = "get_emails" });
+            using var response = await client.SendAsync(request);
+            Assert.True(response.StatusCode == HttpStatusCode.NotFound, $"{method} {path}: {(int)response.StatusCode}");
+            Assert.Equal(code, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        }
     }
 }
 

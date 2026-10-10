@@ -171,7 +171,7 @@ public sealed class ApprovalsController(
         if (string.IsNullOrEmpty(request.RunId))
             return BadRequest(new { error = "Which run?", code = "RUN_NOT_FOUND" });
         var denied = store.DenyRun(profileId, request.RunId);
-        logger.LogInformation("{Count} proposal(s) of run {Run} denied.", denied, request.RunId);
+        logger.LogInformation("{Count} proposal(s) of run {Run} denied.", denied, LoggableId(request.RunId));
         return Ok(new { denied });
     }
 
@@ -209,6 +209,10 @@ public sealed class ApprovalsController(
     /// <summary>A step-up can only finish for this session, this proposal and these exact arguments.</summary>
     private static string Binding(Session session, string proposalId, string argsHash) =>
         $"{Base64Url.Encode(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(session.Id)))}|{proposalId}|{argsHash}";
+
+    /// <summary>A client-supplied id goes into the log only when it has the shape of one of ours (base64url, ≤ 64).</summary>
+    internal static string LoggableId(string? id) =>
+        id is { Length: > 0 and <= 64 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_') ? id : "(malformed)";
 
     private IActionResult? NotPending(ProposalRow row) =>
         ProposalExecutor.IsExpired(row, DataStore.Now()) ? Expired()

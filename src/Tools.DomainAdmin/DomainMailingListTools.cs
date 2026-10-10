@@ -572,7 +572,7 @@ public sealed class DomainMailingListTools
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray();
 
-    private static readonly string[] SecretKeyFragments = ["password", "secret", "apikey", "privatekey"];
+    private static readonly string[] SecretKeyFragments = SmarterMailMcp.Core.SecretRedactor.DefaultFragments;
 
     /// <summary>Blanks any non-empty string under a password/secret-like key, at any depth.</summary>
     private static JsonElement Redact(JsonElement element)

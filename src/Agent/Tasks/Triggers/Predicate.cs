@@ -23,7 +23,7 @@ namespace SmarterMailAgent.Tasks.Triggers;
 /// { "path": "expiration", "op": "daysUntilLt", "value": 14 } daysUntilLt daysUntilGt daysAgoLt daysAgoGt
 /// { "path": "$.error", "op": "exists" }
 /// { "count": { "items": "$.users[*]", "where": { … } }, "op": "gte", "value": 1 }
-/// { "new": { "items": "$.emails[*]", "key": "uid", "where": { … } } }
+/// { "new": { "items": "$.emails[*]", "key": "uid", "where": { … } } }   at most one per predicate
 /// { "all": [ … ] }  { "any": [ … ] }  { "not": { … } }
 /// </code>
 /// </para>
@@ -89,6 +89,7 @@ public sealed class Predicate
     {
         public int Count;
         public bool UsesNew;
+        public string? FirstNewAt;
 
         private static readonly string[] Comparisons = ["eq", "ne", "gt", "gte", "lt", "lte"];
         private static readonly string[] TextOps = ["contains", "startsWith", "endsWith"];
@@ -147,6 +148,13 @@ public sealed class Predicate
             {
                 if (!Only(e, at, "new"))
                     return null;
+                if (FirstNewAt is { } first)
+                {
+                    // One set of seen keys per task: two "new" nodes would share (and overrun) it.
+                    errors.Add($"{at}: only one \"new\" condition is allowed (there is already one at {first}).");
+                    return null;
+                }
+                FirstNewAt = at;
                 UsesNew = true;
                 var items = Items(@new, $"{at}.new", depth, out var where, allowKey: true, out var key);
                 return items is null || (where is null && @new.TryGetProperty("where", out _)) || key is null

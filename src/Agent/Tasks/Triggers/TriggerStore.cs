@@ -6,8 +6,9 @@ namespace SmarterMailAgent.Tasks.Triggers;
 public sealed record ProbeRow(TaskRow Task, long NextProbeAt, string? State, int ProbeFailures);
 
 /// <summary>What the task card shows. No evidence, no seen keys.</summary>
+/// <param name="Deferrals">Scheduled probes put off in a row because the mail server's probe budget was spent (in memory; 0 after a restart).</param>
 public sealed record TriggerStatus(
-    DateTimeOffset? NextProbeAt, DateTimeOffset? LastProbeAt, bool? LastValue, int ProbeFailures, int FiresToday);
+    DateTimeOffset? NextProbeAt, DateTimeOffset? LastProbeAt, bool? LastValue, int ProbeFailures, int FiresToday, int Deferrals = 0);
 
 /// <summary>The probe columns of <c>tasks</c> (migration 4). Raw ADO.NET, next to <see cref="TaskStore"/>.</summary>
 public sealed class TriggerStore(DataStore db)

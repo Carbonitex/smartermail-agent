@@ -35,6 +35,31 @@ public class RedactionTests
         Assert.Equal("PUB", result.GetProperty("nested").GetProperty("items")[0].GetProperty("publicKey").GetString());
     }
 
+    /// <summary>
+    /// Every <c>domain_*</c> result is redacted with at least the shared fragments (token and
+    /// credential included), so no file in Tools.DomainAdmin can drift to a shorter private list.
+    /// </summary>
+    [Fact]
+    public void Every_domain_tool_file_redacts_at_least_the_default_fragments()
+    {
+        var assembly = typeof(SmarterMailMcp.Server.Tools.DomainAdminTools).Assembly;
+        var withFragments = assembly.GetTypes()
+            .Select(t => (Type: t, Field: t.GetField("SecretKeyFragments",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)))
+            .Where(x => x.Field is not null)
+            .ToList();
+
+        Assert.Equal(
+            ["DomainAdminTools", "DomainMailingListTools", "DomainRoutingTools", "DomainSecurityTools", "DomainUserTools"],
+            withFragments.Select(x => x.Type.Name).Order(StringComparer.Ordinal));
+        foreach (var (type, field) in withFragments)
+        {
+            var fragments = (string[])field!.GetValue(null)!;
+            Assert.All(SecretRedactor.DefaultFragments, f => Assert.Contains(f, fragments));
+            Assert.True(fragments.Length > 0, type.Name);
+        }
+    }
+
     [Fact]
     public void Key_value_pairs_are_blanked_when_asked()
     {

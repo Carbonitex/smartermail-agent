@@ -24,6 +24,8 @@ export const SUBAGENT_MAX_ROUNDS = 8;
 export const SUBAGENT_MAX_TOKENS = 400000;
 export const DIRECT_MAX_CHARS = 200000;
 export const OP_TIMEOUT_MS = 3000;
+/** Loading an artifact (up to 16 MB) into a fresh worker; the operator clock starts after it. */
+export const LOAD_TIMEOUT_MS = 30000;
 export const ANALYSIS_REASONING = 'low';
 const OP_RESULT_CLAMP = 8000 + 200;
 
@@ -58,7 +60,10 @@ export function wantsExactAnswer(question) {
 
 /* ----------------------------------------------------------------- runners */
 
-/** Operators in this thread. For tests, and the rare browser without module workers. */
+/**
+ * Operators in this thread, with no timeout. For tests only: the browser
+ * refuses analyze_result's operator path without a module worker instead.
+ */
 export function createInlineRunner(artifact) {
   let data = null;
   return {
@@ -75,21 +80,37 @@ export function createInlineRunner(artifact) {
 }
 
 /**
- * Operators in a dedicated Worker holding this one artifact. An operator that
- * runs past `timeoutMs` gets the worker terminated (the next call starts a
- * fresh one) and a model-readable error back.
+ * Operators in a dedicated Worker holding this one artifact.
+ *
+ * Two clocks. Loading the artifact into a fresh worker (up to 16 MB, copied
+ * and split into lines there) has `loadTimeoutMs`, and the worker answers the
+ * load before any operator is sent. Only then does an operator get
+ * `timeoutMs`, so a slow device loading a big artifact is never reported as a
+ * pattern that backtracks. An operator past its time gets the worker
+ * terminated (the next call starts a fresh one) and a model-readable error. A
+ * load that times out or fails is final for this runner: every later call
+ * gets the same error at once instead of waiting again.
  */
 export function createWorkerRunner(artifact, {
   timeoutMs = OP_TIMEOUT_MS,
+  loadTimeoutMs = LOAD_TIMEOUT_MS,
   createWorker = () => new Worker(new URL('./artifact-worker.js', import.meta.url), { type: 'module' })
 } = {}) {
   let worker = null;
+  let ready = null;        // Promise<{ok, error?}> for the current worker's load
+  let loadFailure = null;  // sticky: the load could not finish
   let seq = 0;
   const pending = new Map();
 
   const fail = (error) => {
     for (const [, p] of pending) { clearTimeout(p.timer); p.resolve({ ok: false, error }); }
     pending.clear();
+  };
+
+  const kill = () => {
+    if (worker) { try { worker.terminate(); } catch { /* gone */ } }
+    worker = null;
+    ready = null;
   };
 
   const start = () => {
@@ -113,19 +134,35 @@ export function createWorkerRunner(artifact, {
       worker.on('message', onMessage);
       worker.on('error', onError);
     }
+    const size = formatSize(artifact.chars ?? String(artifact.body ?? '').length);
+    ready = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pending.delete('load');
+        kill();
+        resolve({
+          ok: false,
+          error: `The artifact (${size}) did not finish loading into the analysis worker within ${loadTimeoutMs / 1000} s, ` +
+            'so no operator ran. This is the device being slow or short of memory, not the pattern. Answer from what you already have and say the artifact could not be searched.'
+        });
+      }, loadTimeoutMs);
+      pending.set('load', {
+        timer,
+        resolve: (r) => resolve(r.ok ? r : { ok: false, error: `The artifact could not be loaded into the analysis worker: ${r.error}` })
+      });
+    }).then((r) => { if (!r.ok) loadFailure = r.error; return r; });
     worker.postMessage({ type: 'load', id: 'load', kind: artifact.kind, body: artifact.body, meta: metaOf(artifact) });
   };
 
-  const kill = () => {
-    if (worker) { try { worker.terminate(); } catch { /* gone */ } }
-    worker = null;
-  };
-
   return {
-    run(op, args) {
+    async run(op, args) {
+      if (loadFailure) return { ok: false, error: loadFailure };
       if (!worker) start();
+      const loaded = await ready;
+      if (!loaded || !loaded.ok) return { ok: false, error: (loaded && loaded.error) || 'Stopped: the analysis worker was closed.' };
+      if (!worker) return { ok: false, error: 'Stopped: the analysis worker was closed.' };
       const id = ++seq;
       return new Promise((resolve) => {
+        // The operator's clock starts only now, after the artifact is loaded.
         const timer = setTimeout(() => {
           pending.delete(id);
           kill();
@@ -136,7 +173,7 @@ export function createWorkerRunner(artifact, {
         worker.postMessage({ type: 'op', id, op, args });
       });
     },
-    close() { fail('Closed.'); kill(); }
+    close() { fail('Stopped: the analysis worker was closed.'); kill(); }
   };
 }
 
@@ -144,8 +181,36 @@ function metaOf(artifact) {
   return { handle: artifact.handle, tool: artifact.tool, truncated: !!artifact.truncated, originalChars: artifact.originalChars };
 }
 
-const defaultRunner = (artifact) =>
-  typeof Worker !== 'undefined' ? createWorkerRunner(artifact) : createInlineRunner(artifact);
+let moduleWorkers = null;
+
+/**
+ * Whether this browser runs module workers (`new Worker(url, { type: 'module' })`).
+ * Detected without starting one: the constructor reads `type` before it
+ * parses the (deliberately invalid) URL and throws.
+ */
+export function supportsModuleWorkers(WorkerImpl = (typeof Worker !== 'undefined' ? Worker : undefined)) {
+  if (typeof WorkerImpl !== 'function') return false;
+  let supported = false;
+  try {
+    const w = new WorkerImpl('blob://', { get type() { supported = true; return 'module'; } });
+    try { w.terminate(); } catch { /* never started */ }
+  } catch { /* expected: the URL is invalid */ }
+  return supported;
+}
+
+/** Why analyze_result refuses to run operators here (no worker: a model-written regex must never run on the page thread). */
+export const NO_WORKER_ERROR =
+  'analyze_result cannot search this artifact here: this browser does not run module workers, and the analysis patterns must not run on the page itself (one that backtracks would freeze the tab). ' +
+  'Answer from the result stub (its head and tail), or call the original tool again with narrower arguments.';
+
+/**
+ * The browser's runner: a module Worker, or null when there is none — never
+ * the inline runner, which has no timeout (analyzeResult then refuses).
+ */
+export function defaultRunner(artifact) {
+  if (moduleWorkers === null) moduleWorkers = supportsModuleWorkers();
+  return moduleWorkers ? createWorkerRunner(artifact) : null;
+}
 
 /* -------------------------------------------------------------- the loop */
 
@@ -223,6 +288,7 @@ export async function analyzeResult({
     }
 
     const runner = createRunner(artifact);
+    if (!runner) return finish(true, NO_WORKER_ERROR);
     const messages = [
       { role: 'system', content: SUBAGENT_PROMPT },
       { role: 'user', content: `${describe(artifact)}\n\nQuestion: ${question}` }

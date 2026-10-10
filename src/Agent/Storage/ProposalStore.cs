@@ -46,7 +46,8 @@ public sealed class ProposalStore(DataStore db)
 
     /// <summary>
     /// Inserts a pending proposal, in one write transaction: when the same dedupe key is already
-    /// pending (and unexpired) nothing is written and that row's id comes back; when the profile has
+    /// pending (and unexpired) that row moves to this run, its passkey requirement is OR-ed with this
+    /// one, and its id comes back; when the profile has
     /// <paramref name="maxPending"/> pending proposals, nothing is written either.
     /// </summary>
     public (CreateOutcome Outcome, string? Id) Create(ProposalRow row, int maxPending)
@@ -61,6 +62,13 @@ public sealed class ProposalStore(DataStore db)
             existing.Transaction = tx;
             if (existing.ExecuteScalar() is string id)
             {
+                // The newer run reported it, so it is listed (and denied) with that run; and a
+                // passkey requirement only ever tightens. The sealed copies keep the first run's id.
+                using var update = c.Command(
+                    "UPDATE task_proposals SET run_id = $r, needs_passkey = MAX(needs_passkey, $np) WHERE id = $id",
+                    ("$r", row.RunId), ("$np", row.NeedsPasskey ? 1 : 0), ("$id", id));
+                update.Transaction = tx;
+                update.ExecuteNonQuery();
                 tx.Commit();
                 return (CreateOutcome.Deduped, id);
             }
@@ -230,6 +238,29 @@ public sealed class ProposalStore(DataStore db)
         using var cmd = c.Command(
             "UPDATE task_proposals SET status = 'unknown', error_code = 'INTERRUPTED', payload = NULL, executed_at = $now WHERE status = 'executing'",
             ("$now", DataStore.Now()));
+        return cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Deletes decided proposals (executed, failed, denied, expired, unknown) decided before
+    /// <paramref name="olderThan"/>, and any beyond the newest <paramref name="keepPerProfile"/> decided
+    /// ones of a profile. Pending and executing rows are never touched. Returns how many.
+    /// </summary>
+    public int PruneDecided(long olderThan, int keepPerProfile)
+    {
+        using var c = db.Open();
+        using var cmd = c.Command(
+            """
+            DELETE FROM task_proposals
+            WHERE status IN ('executed', 'failed', 'denied', 'expired', 'unknown')
+              AND (COALESCE(executed_at, decided_at, created_at) < $before
+                   OR id IN (SELECT id FROM (
+                                SELECT id, ROW_NUMBER() OVER (PARTITION BY profile_id ORDER BY created_at DESC, id) AS n
+                                FROM task_proposals
+                                WHERE status IN ('executed', 'failed', 'denied', 'expired', 'unknown'))
+                             WHERE n > $keep))
+            """,
+            ("$before", olderThan), ("$keep", Math.Max(0, keepPerProfile)));
         return cmd.ExecuteNonQuery();
     }
 

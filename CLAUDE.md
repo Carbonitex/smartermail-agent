@@ -835,25 +835,43 @@ The server forces approval on nothing; the editor pre-selects it for destructive
   values as their raw text). `argsHash = base64url(SHA-256("sma-proposal-v1\n" + tool + "\n" +
   accountId + "\n" + argsJson))`. The browser hashes the string it displays (`js/approvals-core.js`);
   `dev/test/vectors/proposal-hash.json` pins both. Over 64 KB or a duplicate key: not queued (`isError`).
+- **Display**: `revealText` / `revealWarning` (`js/approvals-core.js`) show Cc (except tab and newline),
+  Cf, Co, Cs, Zl, Zp, non-U+0020 spaces, fillers and variation selectors as `⟦U+XXXX⟧` markers, and mark
+  non-ASCII characters in address-like arguments, with a warning line. Display only: the hash is always
+  over the original `argsJson`.
 - **Storage** (`task_proposals`, migration 3): `payload` sealed with `DATA_KEY` (`sma-task-proposal-v1`,
   `profileId|id`) and NULL at every terminal state; `display` and `result` sealed to the profile public
   key (`task-proposal|profileId|id`, `task-proposal-result|profileId|id`). In clear: status, timestamps,
   `needs_passkey`, `dedupe` = HMAC(HKDF(DATA_KEY, `sma-proposal-dedupe-v1`), `profileId|taskId|argsHash`):
-  the same pending call for the same task is queued once. At `APPROVAL_MAX_PENDING` the model is told
-  the queue is full.
+  the same pending call for the same task is queued once; a duplicate moves the row's `run_id` to the
+  newer run (it is listed and "deny all"-ed with that run; the sealed copies keep the first run's id)
+  and ORs `needs_passkey`, so a requirement only ever tightens. At `APPROVAL_MAX_PENDING` the model is
+  told the queue is full. `task_runs.proposals` is recorded in a `finally`, so a run whose loop threw
+  still counts what it proposed.
+- **Retention** (`ProposalMaintenance`, hourly): decided proposals (`executed failed denied expired
+  unknown`) are deleted 30 days after their decision (`RetentionDays`) and beyond the newest 200 per
+  profile (`KeepPerProfile`); pending and executing rows never.
 - **Executor** (`ProposalExecutor`, 60 s): claim (`pending → executing`, one UPDATE) → open payload →
   compare hash (mismatch: back to pending) → re-check the current task (tool allowed, account in task)
-  → account live (server down before the call: back to pending, 503) → dispatch under
+  → account live (server down, or too slow restoring the account within the 60 s budget, before the
+  call: back to pending, 503) → dispatch under
   `ToolGate.Approved` (exactly one call with that tool, account and hash) → `executed` / `failed`,
   result sealed, payload erased. Startup: `executing → unknown` (`INTERRUPTED`), never retried. Every
   30 s: expired pending → `expired`.
-- **Step-up**: `needs_passkey = destructive || scope ∈ {DomainAdmin, SysAdmin} || requirePasskey`.
+- **Step-up**: `needs_passkey = destructive || scope ∈ {DomainAdmin, SysAdmin} || sends mail ||
+  requirePasskey`. "Sends mail" (`TaskProposalSink.SendsMail`) = a `send_` / `forward_` / `reply_`
+  name, or `OutboundMailTools`: `respond_to_meeting`, `new_or_update_calendar_event` (invitations),
+  `create_content_filter`, `create_content_filter_simple`, `update_content_filter` (a rule can
+  forward); pinned in `ApprovalGateTests`.
   `PasskeyService.BeginStepUp` / `CompleteStepUpAsync`: allow-list = the profile's passkeys, UV
   required, binding `SHA-256(sessionId)|proposalId|argsHash` held server-side, the passkey must belong
   to the profile, counter advanced. A step-up ceremony never completes a sign-in. Direct chat and
   `/mcp` calls get no step-up.
 - **Email**: a run that queued proposals and has `EmailAccountId` adds a fixed footer to its report
   (count, first expiry, `PUBLIC_ORIGIN`+`PATH_BASE`); no arguments, no approve links.
+- **Paused tasks**: approving runs the change even while its task is disabled or the profile's tasks
+  are paused (the executor re-checks the definition, not the enabled flag): an approval is an explicit
+  decision by the owner. Pausing stops new proposals, not decisions on queued ones; deny them to drop them.
 
 `ProposalView` = `{ id, taskId, runId, status, needsPasskey, createdAt, expiresAt, decidedAt,
 executedAt, errorCode, errorMessage, read, display, result }`; a pending proposal past `expiresAt`
@@ -876,7 +894,12 @@ Row codes: `PROPOSAL_UNREADABLE`, `TOOL_NO_LONGER_ALLOWED`, `ACCOUNT_NOT_IN_TASK
 `ACCOUNT_UNREADABLE` (as `TaskRunner.Explain`), `TOOL_ERROR`, `INTERRUPTED` / `TIMEOUT` / `ERROR`
 (status `unknown`). Logged: proposal created / deduped (task id, proposal id), queue full, approved
 (passkey yes/no), denied, executed (proposal id, tool, role, duration, isError, code), expired and
-interrupted counts; never arguments, hash, note, results, handles or task names.
+interrupted and pruned counts; never arguments, hash, note, results, handles or task names (a
+client-supplied `runId` is logged only when it is a well-formed id, else `(malformed)`).
+
+With `TASKS_ENABLED=false` or no `DATA_KEY`, every `/api/tasks*` endpoint (tasks, proposals, probe)
+answers `404 TASKS_DISABLED` / `TRIGGERS_DISABLED`: the stores are registered whenever server mode is
+on, so the controllers can be built and refuse by themselves.
 
 ### Condition-triggered tasks
 
@@ -902,7 +925,8 @@ the predicate run **without an LLM**; firing either starts the task's normal run
   timeout = false + a warning), `daysUntilLt daysUntilGt daysAgoLt daysAgoGt` (ISO-8601 / RFC 1123, no
   offset = UTC), `exists`; `{count:{items, where?}, op, value}`; `{new:{items, key?, where?}}` (key =
   the `key` path(s), else id/uid/messageId/guid, else a date field + a subject-like field, else the
-  whole item); `all` / `any` (no short-circuit) / `not`. Limits: 20 nodes, depth 6, 8 segments, regex
+  whole item; **at most one `new` node per predicate**, since a task has one `seen` set: a second is a
+  parse error naming it); `all` / `any` (no short-circuit) / `not`. Limits: 20 nodes, depth 6, 8 segments, regex
   200, 8 KB, a work budget (`PREDICATE_LIMIT`). Parse errors name the node (`when.all[1].value: …`).
   Evidence: the values / items that made it true as `{path, value}`, ≤ 20, each ≤ 2 KB, ≤ 16 KB.
 - **Probe result**: `ToolInvoker.Flatten`, JSON ≤ 1 MB, depth 64. An error, `success:false` or
@@ -917,7 +941,12 @@ the predicate run **without an LLM**; firing either starts the task's normal run
 - **Prober** (`TriggerProber`, hosted, single replica): 30 s tick; claims `next_probe_at <= now` with
   a conditional `UPDATE` (every ± 10 %); outside `activeHours` moves to the window's next start. Per
   mail server a token bucket (`ProbeHostBucket`, keyed like `HostLoginThrottle`,
-  `PROBES_PER_HOST_PER_MINUTE`); empty = retry next tick. `TRIGGER_CONCURRENCY` probes, 30 s each. The
+  `PROBES_PER_HOST_PER_MINUTE`); empty = retry next tick, counted in memory as consecutive deferrals
+  (`TaskView.trigger.deferrals`, reset by a probe that gets a token or a restart). **Interactive
+  probes** (Test probe, Run now / Test run on a condition task) never touch it: `InteractiveProbeLimiter`
+  gives them their own per-server bucket (a fifth of `PROBES_PER_HOST_PER_MINUTE`, at least 1, on top
+  of it) and a per-profile one (`PROBES_PER_PROFILE_PER_MINUTE`, 6); either empty = `429
+  PROBE_THROTTLED`. `TRIGGER_CONCURRENCY` probes, 30 s each. The
   read goes through `ToolDispatcher` on a `ProbeToolContext` whose `ToolGate` has an empty allowlist:
   a tampered definition naming a write is refused by the dispatcher (and `ProbeRunner` refuses a
   non-read first). Intervals < 15 min keep a task lease on the profile runtime (released by
@@ -941,8 +970,8 @@ the predicate run **without an LLM**; firing either starts the task's normal run
 |---|---|
 | `POST /api/tasks`, `PUT /api/tasks/{id}` | `TaskRequest.trigger` (shape above); `cron` ignored when set. `400 TASK_INVALID` (predicate errors prefixed `Condition: when…`), `409 TRIGGER_LIMIT` at `TRIGGERS_PER_PROFILE` (inside `TASKS_PER_PROFILE`) |
 | `POST /api/tasks/probe` | `api` limiter, unlocked profile session. `{ accountId, tool, arguments, when? }` → `200 { result (≤ 60,000), json, truncated, isError, code, evaluation: { value, matched, truncated, errors, description } \| null }`, as the session's live account; no state, every item counts as new. `400 PROBE_INVALID`, `404 ACCOUNT_NOT_LIVE`, `409 PROFILE_LOCKED`, `429 PROBE_THROTTLED`, `404 TRIGGERS_DISABLED` |
-| `GET /api/tasks` | `TaskView.trigger: { nextProbeAt, lastProbeAt, lastValue, probeFailures, firesToday } \| null`; condition tasks have `nextRunAt: null` |
-| `POST /api/tasks/{id}/run` | condition task: `202 { runId }`; `409 TASK_RUNNING`, `429 PROBE_THROTTLED`, `502 PROBE_FAILED / PROBE_NOT_JSON / ACCOUNT_UNAVAILABLE` |
+| `GET /api/tasks` | `TaskView.trigger: { nextProbeAt, lastProbeAt, lastValue, probeFailures, firesToday, deferrals } \| null`; condition tasks have `nextRunAt: null` |
+| `POST /api/tasks/{id}/run` | `api` limiter (every task). Condition task: `202 { runId }`; `409 TASK_RUNNING`, `429 PROBE_THROTTLED`, `502 PROBE_FAILED / PROBE_NOT_JSON / ACCOUNT_UNAVAILABLE` |
 
 Run `trigger` values: `schedule`, `manual`, `condition`. Failure codes: `PROBE_FAILED`,
 `PROBE_NOT_JSON`, `PROBE_INVALID` (hard), `PREDICATE_UNREADABLE` (hard), `PREDICATE_LIMIT`,
@@ -973,7 +1002,10 @@ Same rules in the browser (`llm.js` `buildRequestBody`) and for scheduled runs
   `elideOldToolResults` replaces tool results over 2,000 characters from before the previous turn with
   `[earlier result of <tool> (<n> chars) omitted …; call the tool again if you need it]`. Permanent
   and only at turn boundaries, so every round of a turn keeps a stable cached prefix; tool-call
-  pairing is untouched and the tool cards keep the full result.
+  pairing is untouched and the tool cards keep the full result. Never elided: results of write tools
+  (`runTurn`'s `isWrite`, from the tool list's `write` flag, recorded when the result arrives) and
+  error results. Without such a record, `isWrite(name)` and then a read-name rule decide; an unknown
+  name gets `…; if this call changed something, that change was already made: do not repeat it]`.
 - Usage (`prompt_tokens_details.cached_tokens`, `cache_write_tokens`, `cost`) is summed per turn
   (`runTurn` → `usage`, `ui.onUsage`, `state.usage`) and per run (`AgentLoop.Result`). Not yet shown in
   the chat UI.
@@ -1001,8 +1033,10 @@ tokens).
   artifacts in the tab's memory only (LRU, 64 MB total, 16 MB each), never storage, never the
   server. analyze_result is a `localTools` entry of `runTurn` — it never reaches /api/tools/call —
   and runs with the user's key. Operators run in a module Worker
-  (`new URL('./artifact-worker.js', import.meta.url)`, so under `/v/{version}/js/`), terminated
-  after 3 s. `analyze_result` is appended last to the tools while the Tools menu's "Large results"
+  (`new URL('./artifact-worker.js', import.meta.url)`, so under `/v/{version}/js/`). The worker
+  confirms the artifact load first (`LOAD_TIMEOUT_MS`, 30 s, its own error, final for that call); only
+  then does an operator's 3 s timeout start. Without module-worker support the operator path is refused
+  (`NO_WORKER_ERROR`), never run on the page thread; the direct path still works. `analyze_result` is appended last to the tools while the Tools menu's "Large results"
   switch is on (always, so the prefix stays byte-stable); the system prompt gains "# Large
   results". Settings: sessionStorage `analysisOff` / `analysisModel`, and `analysis` /
   `analysisModel` in the profile settings blob. Cards: an artifact badge, a Blob download under the
@@ -1206,7 +1240,7 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 | `TASK_ANALYSIS_MODEL` | `ANALYSIS_MODEL` | analysis model for scheduled runs; `off`/`none` = results clamped as before |
 | `APPROVAL_MAX_PENDING` | `100` | pending approval proposals per profile |
 | `TASK_MAX_PROPOSALS` | `50` | highest per-run proposal limit a task may set |
-| `TRIGGERS_ENABLED` (true), `TRIGGER_MIN_INTERVAL_MINUTES` (5), `TRIGGERS_PER_PROFILE` (5), `TRIGGER_MAX_RUNS_PER_DAY` (24), `TRIGGER_CONCURRENCY` (4), `PROBES_PER_HOST_PER_MINUTE` (30) | | condition-triggered tasks |
+| `TRIGGERS_ENABLED` (true), `TRIGGER_MIN_INTERVAL_MINUTES` (5), `TRIGGERS_PER_PROFILE` (5), `TRIGGER_MAX_RUNS_PER_DAY` (24), `TRIGGER_CONCURRENCY` (4), `PROBES_PER_HOST_PER_MINUTE` (30), `PROBES_PER_PROFILE_PER_MINUTE` (6, interactive probes) | | condition-triggered tasks |
 | `PATH_BASE` | `/` | path prefix, e.g. `/mail-agent` when a reverse proxy serves it under one |
 | `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` / `-Proto` are believed. Unset = forwarded headers ignored; limits key off the TCP peer. A malformed entry fails startup |
 | `TRUST_CF_CONNECTING_IP` | `false` | key rate limits off `CF-Connecting-IP`, only when the TCP peer is a trusted proxy |
@@ -1338,8 +1372,16 @@ reaches stdout.
   question applies to most `domain_update_*` tools (settings, signatures, event hooks, mailing
   lists, password policy), plus whether enums round-trip as numbers, local part vs full address
   on group/protocol endpoints, and whether `whitelist` POST replaces the whole list.
-- There is no approval step for admin writes beyond the per-account read-only flag and a
-  system-prompt instruction to state the change and get confirmation first.
+- There is no approval step for admin writes **in chat** beyond the per-account read-only flag and a
+  system-prompt instruction to state the change and get confirmation first (scheduled tasks have the
+  approval queue).
+- Approved changes still run while their task is disabled or the profile's tasks are paused (see
+  "Approval queue").
+- A `new` predicate keyed on date + subject (the fallback when items carry no id) lets outside senders
+  start runs: every distinct message they send is a new key, up to `TRIGGER_MAX_RUNS_PER_DAY` per task.
+  Key on an id where the tool returns one, and keep allowed writes behind approval.
+- Not checked against a live server: whether a read tool used as a probe (e.g. reading a message
+  rather than listing) marks mail as read on SmarterMail.
 - Remember-me: a browser copy goes stale if a refresh happens and no browser request follows
   before the session expires (an MCP bearer caller refreshing, or a tab closed right after a
   refresh); resume then fails and the user signs in again. On resume, accounts that fail are left

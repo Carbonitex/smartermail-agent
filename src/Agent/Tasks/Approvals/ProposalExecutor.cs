@@ -35,6 +35,9 @@ public sealed class ProposalExecutor(
 {
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>Tests only: a shorter budget for getting the account live (and the call), instead of <see cref="Timeout"/>.</summary>
+    internal TimeSpan? RestoreTimeout { get; set; }
+
     public enum Kind
     {
         /// <summary>The tool ran and reported success.</summary>
@@ -123,8 +126,19 @@ public sealed class ProposalExecutor(
         var runtime = registry.AcquireTask(profileId);
         try
         {
-            using var timeout = new CancellationTokenSource(Timeout);
-            var (account, failure) = await AccountAsync(runtime, payload.AccountId, timeout.Token);
+            using var timeout = new CancellationTokenSource(RestoreTimeout ?? Timeout);
+            Account? account;
+            string? failure;
+            try
+            {
+                (account, failure) = await AccountAsync(runtime, payload.AccountId, timeout.Token);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or HttpRequestException or TimeoutException)
+            {
+                // Getting the account live is before the call: a slow or unreachable mail server means
+                // nothing ran, so the proposal goes back to pending instead of 'unknown'.
+                (account, failure) = (null, "ACCOUNT_UNAVAILABLE");
+            }
             if (failure == "ACCOUNT_UNAVAILABLE")
             {
                 store.Release(profileId, row.Id);

@@ -592,8 +592,7 @@ public sealed class DomainRoutingTools
     private static JsonElement Fail(string message) =>
         JsonSerializer.SerializeToElement(new { success = false, error = message });
 
-    private static readonly string[] SecretKeyFragments =
-        ["password", "secret", "apikey", "privatekey", "token", "credential"];
+    private static readonly string[] SecretKeyFragments = SmarterMailMcp.Core.SecretRedactor.DefaultFragments;
 
     private static bool IsSecretKey(string key) =>
         SecretKeyFragments.Any(f => key.Contains(f, StringComparison.OrdinalIgnoreCase));

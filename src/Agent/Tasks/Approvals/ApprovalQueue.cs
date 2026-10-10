@@ -41,10 +41,18 @@ public sealed class ApprovalQueue(
     /// <summary>Records how many proposals the run made; returns the report-email footer (null for none).</summary>
     public string? Finish(string runId, ToolGate gate, TimeZoneInfo zone)
     {
+        if (Record(runId, gate) is not { } sink)
+            return null;
+        return ApprovalPrompt.EmailFooter(sink.Count, sink.EarliestExpiry, zone, AppUrl());
+    }
+
+    /// <summary>Records how many proposals the run made, when it made any (also for a run that failed mid-way).</summary>
+    public TaskProposalSink? Record(string runId, ToolGate gate)
+    {
         if (gate.Proposals is not TaskProposalSink sink || sink.Count == 0)
             return null;
         store.SetRunProposals(runId, sink.Count);
-        return ApprovalPrompt.EmailFooter(sink.Count, sink.EarliestExpiry, zone, AppUrl());
+        return sink;
     }
 
     /// <summary><c>PUBLIC_ORIGIN</c> plus <c>PATH_BASE</c>, when the operator set an origin.</summary>

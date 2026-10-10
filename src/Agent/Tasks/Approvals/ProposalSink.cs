@@ -137,11 +137,37 @@ public sealed class TaskProposalSink(
         return Task.FromResult<ProposalResult>(new ProposalResult.Queued(storedId!, deduped, expiresAt));
     }
 
-    /// <summary>Destructive tools, admin scopes, or a task that asks for a passkey on every approval.</summary>
+    /// <summary>
+    /// Destructive tools, admin scopes, mail that leaves the server (<see cref="SendsMail"/>), or a
+    /// task that asks for a passkey on every approval.
+    /// </summary>
     public static bool NeedsPasskey(ToolEntry tool, TaskApprovals approvals) =>
         tool.Tool.ProtocolTool.Annotations?.DestructiveHint == true ||
         tool.Scope is ToolScope.DomainAdmin or ToolScope.SysAdmin ||
+        SendsMail(tool.Name) ||
         approvals.PasskeyAlways;
+
+    /// <summary>Name prefixes of tools that send mail; any tool so named is covered even if added later.</summary>
+    public static readonly string[] OutboundMailPrefixes = ["send_", "forward_", "reply_"];
+
+    /// <summary>
+    /// Mailbox tools that send mail (or set up mail that leaves the server) without a send prefix:
+    /// meeting responses and calendar invitations go to other people, and content filters can forward.
+    /// Pinned by <c>ApprovalGateTests</c>.
+    /// </summary>
+    public static readonly IReadOnlySet<string> OutboundMailTools = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "respond_to_meeting",
+        "new_or_update_calendar_event",
+        "create_content_filter",
+        "create_content_filter_simple",
+        "update_content_filter",
+    };
+
+    /// <summary>The call can send mail to someone (now or through a rule it creates).</summary>
+    public static bool SendsMail(string toolName) =>
+        OutboundMailTools.Contains(toolName) ||
+        OutboundMailPrefixes.Any(p => toolName.StartsWith(p, StringComparison.Ordinal));
 
     /// <summary>
     /// <c>HMAC-SHA-256(HKDF(DATA_KEY, "sma-proposal-dedupe-v1"), profileId|taskId|argsHash)</c>: equal

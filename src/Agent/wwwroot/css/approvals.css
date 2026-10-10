@@ -32,6 +32,17 @@
 pre.approval-arg-value { margin: 0; max-height: 220px; overflow: auto; }
 .approval-arg-value.address { color: var(--amber); font-weight: 600; }
 .approval-arg-value.empty { color: var(--text-faint); font-style: italic; }
+/* Hidden / direction-changing characters as ⟦U+XXXX⟧, and non-ASCII letters in addresses (approvals-core.js revealText). */
+.char-hidden {
+  color: var(--red); background: oklch(55% 0.20 25 / 0.14); border-radius: 3px; padding: 0 2px;
+  font-family: var(--mono); font-weight: 600; font-style: normal; unicode-bidi: isolate;
+}
+.char-nonascii {
+  color: var(--red); background: oklch(55% 0.20 25 / 0.14); border-radius: 2px;
+  text-decoration: underline wavy; text-underline-offset: 3px;
+}
+.approval-args tr.suspicious td { background: oklch(55% 0.20 25 / 0.06); }
+.approval-arg-warning { margin: 4px 0 0; font-size: .75rem; color: var(--red); font-family: inherit; }
 
 .approval-raw { margin-top: 8px; font-size: .8rem; }
 .approval-raw summary { cursor: pointer; color: var(--text-dim); }

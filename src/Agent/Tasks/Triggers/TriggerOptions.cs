@@ -35,6 +35,12 @@ public sealed record TriggerOptions
     /// <summary><c>PROBES_PER_HOST_PER_MINUTE</c>: probe calls per mail server per minute, all profiles together (default 30).</summary>
     public int ProbesPerHostPerMinute { get; init; } = 30;
 
+    /// <summary>Interactive probes (Test probe, Run now) per mail server per minute: their own bucket, a fifth of <see cref="ProbesPerHostPerMinute"/>, at least 1.</summary>
+    public int InteractivePerHostPerMinute => Math.Max(1, ProbesPerHostPerMinute / 5);
+
+    /// <summary><c>PROBES_PER_PROFILE_PER_MINUTE</c>: interactive probes per profile per minute (default 6).</summary>
+    public int InteractivePerProfilePerMinute { get; init; } = 6;
+
     /// <summary>One probe call, including the token refresh it may need.</summary>
     public TimeSpan ProbeTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
@@ -56,6 +62,7 @@ public sealed record TriggerOptions
         MaxRunsPerDay = Int(config, "TRIGGER_MAX_RUNS_PER_DAY", 24),
         Concurrency = Int(config, "TRIGGER_CONCURRENCY", 4),
         ProbesPerHostPerMinute = Int(config, "PROBES_PER_HOST_PER_MINUTE", 30),
+        InteractivePerProfilePerMinute = Int(config, "PROBES_PER_PROFILE_PER_MINUTE", 6),
     };
 
     private static bool Bool(IConfiguration config, string name, bool fallback) =>

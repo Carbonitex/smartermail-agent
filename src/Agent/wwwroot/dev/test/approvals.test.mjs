@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url';
 
 import * as vault from '../../js/vault.js';
 import {
-  proposalHash, argumentRows, formatRemaining, defaultApprovalMode, groupByRun, isAddress
+  proposalHash, argumentRows, formatRemaining, defaultApprovalMode, groupByRun, isAddress,
+  revealText, revealWarning, isHiddenChar
 } from '../../js/approvals-core.js';
 import { startStub, call, post, cookieOf, creds } from './stub.mjs';
 
@@ -47,6 +48,54 @@ test('arguments are shown whole, in order, with addresses and empties marked', (
   assert.ok(isAddress('forwardTo', 'x'));
   assert.ok(isAddress('note', 'see bob@example.org'));
   assert.ok(!isAddress('domain', 'example.com'));
+});
+
+test('hidden and direction-changing characters are shown as ⟦U+XXXX⟧ markers', () => {
+  const hiddenOnes = ['\u202A', '\u202B', '\u202C', '\u202D', '\u202E', '\u2066', '\u2067', '\u2068', '\u2069',
+    '\u200B', '\u200C', '\u200D', '\u200E', '\u200F', '\uFEFF', '\u00AD', '\u2060', '\u0000', '\u001B', '\u007F',
+    '\r', '\u2028', '\u2029', '\u00A0', '\u3000', '\u3164', '\uFE0F', '\u{E0041}', '\uE000', '\uD800'];
+  for (const ch of hiddenOnes) assert.ok(isHiddenChar(ch), `U+${ch.codePointAt(0).toString(16)} should be hidden`);
+  for (const ch of [' ', '\t', '\n', 'a', 'é', 'а', '中', '😀', 'ש']) assert.ok(!isHiddenChar(ch), JSON.stringify(ch));
+
+  // "To: alice@example.com" that reads "moc.elpmaxe@ecila" reversed, plus zero-width noise.
+  const spoof = 'attacker@evil.example\u202E\u200Bmoc.elpmaxe@ecila';
+  const r = revealText(spoof);
+  assert.equal(r.hidden, 2);
+  assert.equal(r.parts.map((p) => p.text).join(''), 'attacker@evil.example⟦U+202E⟧⟦U+200B⟧moc.elpmaxe@ecila');
+  assert.deepEqual(r.parts.filter((p) => p.kind === 'hidden').map((p) => p.code), ['U+202E', 'U+200B']);
+  assert.match(revealWarning(r), /2 hidden or direction-changing characters/);
+  // Tabs and newlines stay layout; a supplementary-plane tag character is one marker, not two halves.
+  assert.equal(revealText('a\tb\nc').parts.length, 1);
+  assert.equal(revealText('x\u{E0041}y').parts[1].text, '⟦U+E0041⟧');
+  assert.equal(revealWarning(revealText('plain text')), null);
+});
+
+test('non-ASCII characters in an address are marked and warned about; elsewhere they are left alone', () => {
+  const lookalike = 'ceo@exаmple.com';                       // Cyrillic а (U+0430)
+  const a = revealText(lookalike, { address: true });
+  assert.deepEqual(a.nonAscii, ['U+0430']);
+  assert.deepEqual(a.parts.map((p) => p.kind), ['text', 'nonascii', 'text']);
+  assert.equal(a.parts.map((p) => p.text).join(''), lookalike);   // the letter stays visible, only marked
+  assert.match(revealWarning(a), /non-ASCII characters in an address \(U\+0430\)/);
+  assert.deepEqual(revealText('Grüße', {}).nonAscii, []);
+  assert.equal(revealText('Grüße').parts.length, 1);
+
+  // The review rows classify the value as an address even when hidden characters split it up.
+  const rows = argumentRows(JSON.stringify({ subject: 'Hi', to: lookalike, note: 'bob\uFEFF@example.org' }));
+  assert.deepEqual(rows.map((r) => r.kind), ['plain', 'address', 'address']);
+  assert.ok(isAddress('memo', 'bob\u200B@example.org'));
+});
+
+test('revealing is display only: rows keep the exact value and the hash covers the original bytes', async () => {
+  const raw = '{"to":"ceo@ex\u0430mple.com\u202Ecom.lam"}';
+  const rows = argumentRows(raw);
+  assert.equal(rows[0].text, 'ceo@ex\u0430mple.com\u202Ecom.lam');
+  const shown = revealText(rows[0].text, { address: true }).parts.map((p) => p.text).join('');
+  assert.notEqual(shown, rows[0].text);
+  const h = await proposalHash('send_email', 'acc-1', raw);
+  assert.equal(h, await proposalHash('send_email', 'acc-1', raw));
+  assert.notEqual(h, await proposalHash('send_email', 'acc-1', raw.replace('\u202E', '')));
+  assert.notEqual(h, await proposalHash('send_email', 'acc-1', raw.replace('\u0430', 'a')));
 });
 
 test('editor defaults, countdowns and grouping', () => {

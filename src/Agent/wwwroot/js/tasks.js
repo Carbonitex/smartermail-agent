@@ -299,7 +299,7 @@ function renderEditor(task) {
     field('Proposals wait this many days, then expire', approval.ttlDays),
     approval.passkey,
     field('Model', model, profile.taskLimits().analysisModel
-      ? `Tool results over 20,000 characters are handed to a second model, ${profile.taskLimits().analysisModel}, billed to the same task key.` : ''),
+      ? `Tool results over ${profile.artifactThreshold().toLocaleString('en-US')} characters are handed to a second model, ${profile.taskLimits().analysisModel}, billed to the same task key.` : ''),
     field('Email the result to you?', email),
     enabled.label,
     error);

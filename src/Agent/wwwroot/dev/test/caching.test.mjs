@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildRequestBody, isAnthropicModel, normaliseUsage, addUsage, elideOldToolResults,
-  streamCompletion, runTurn, ELIDE_THRESHOLD
+  streamCompletion, runTurn, ELIDE_THRESHOLD, toolResultMeta
 } from '../../js/llm.js';
 
 import { textStream } from './fixtures.mjs';
@@ -224,4 +224,93 @@ test('runTurn: elide:false leaves history alone', async () => {
     streamImpl: async () => ({ content: 'ok', reasoning: '', toolCalls: [], finishReason: 'stop', usage: null, aborted: false })
   });
   assert.equal(messages[3].content, big('a'));
+});
+
+/* ------------------------------------------- elision never hides a write or a failure */
+
+/** Two turns: a write and a read with large results, run through runTurn, then two more user turns. */
+async function writeTurn({ isWrite, results }) {
+  const messages = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'move them and list the folder' }];
+  let i = 0;
+  const script = [
+    { toolCalls: [call('w1', 'move_emails'), call('r1', 'get_emails'), call('e1', 'get_emails')], finishReason: 'tool_calls' },
+    { content: 'done', finishReason: 'stop' }
+  ];
+  await runTurn({
+    messages, apiKey: 'k', model: 'm', tools, isWrite,
+    callTool: async () => results.shift(),
+    streamImpl: async () => {
+      const s = script[i++];
+      return { content: s.content || '', reasoning: '', toolCalls: s.toolCalls || [], finishReason: s.finishReason, usage: null, aborted: false };
+    }
+  });
+  messages.push({ role: 'user', content: 'thanks' }, { role: 'assistant', content: 'ok' }, { role: 'user', content: 'did that work?' });
+  return messages;
+}
+
+test('elideOldToolResults: a write tool\'s result and an error result are never elided', async () => {
+  const writeResult = big('w');
+  const errorResult = big('e');
+  const messages = await writeTurn({
+    isWrite: (name) => name === 'move_emails',
+    results: [
+      { isError: false, content: writeResult },
+      { isError: false, content: big('r') },
+      { isError: true, content: errorResult }
+    ]
+  });
+  const tool = (id) => messages.find((m) => m.role === 'tool' && m.tool_call_id === id);
+  assert.deepEqual(toolResultMeta(tool('w1')), { name: 'move_emails', write: true, error: false });
+  assert.deepEqual(toolResultMeta(tool('e1')), { name: 'get_emails', write: false, error: true });
+
+  // isWrite is not even needed later: what runTurn recorded decides.
+  assert.equal(elideOldToolResults(messages), 1);
+  assert.equal(tool('w1').content, writeResult);
+  assert.equal(tool('e1').content, errorResult);
+  assert.match(tool('r1').content, /^\[earlier result of get_emails \(5,000 chars\) omitted to save context; call the tool again if you need it\]$/);
+  // Idempotent: the next turn changes nothing.
+  const once = JSON.stringify(messages);
+  messages.push({ role: 'assistant', content: 'yes' }, { role: 'user', content: 'and now?' });
+  assert.equal(elideOldToolResults(messages), 0);
+  assert.equal(JSON.stringify(messages.slice(0, JSON.parse(once).length)), once);
+});
+
+test('elideOldToolResults: the tool list changing later does not unprotect a write', async () => {
+  const messages = await writeTurn({
+    isWrite: (name) => name === 'move_emails',
+    results: [{ isError: false, content: big('w') }, { isError: false, content: big('r') }, { isError: false, content: big('x') }]
+  });
+  // The account that could write is gone: isWrite now says nothing about move_emails.
+  elideOldToolResults(messages, { isWrite: () => undefined });
+  assert.equal(messages.find((m) => m.tool_call_id === 'w1').content, big('w'));
+});
+
+test('elideOldToolResults: without a record, isWrite and then the name decide; unknown names get a "do not repeat" stub', () => {
+  const history = (name, content = big('a')) => [
+    { role: 'system', content: 'sys' },
+    { role: 'user', content: 'u1' },
+    { role: 'assistant', content: '', tool_calls: [call('x1', name)] },
+    { role: 'tool', tool_call_id: 'x1', content },
+    { role: 'user', content: 'u2' },
+    { role: 'assistant', content: 'a2' },
+    { role: 'user', content: 'u3' }
+  ];
+  // isWrite says write: kept.
+  const a = history('domain_create_user');
+  assert.equal(elideOldToolResults(a, { isWrite: (n) => n === 'domain_create_user' }), 0);
+  assert.equal(a[3].content, big('a'));
+  // Nothing known about a non-read name: elided, but told the change was already made.
+  const b = history('domain_create_user');
+  assert.equal(elideOldToolResults(b), 1);
+  assert.equal(b[3].content, '[earlier result of domain_create_user (5,000 chars) omitted to save context; if this call changed something, that change was already made: do not repeat it]');
+  assert.doesNotMatch(b[3].content, /call the tool again/);
+  // A read-looking name keeps the plain stub.
+  const c = history('search_log_files');
+  elideOldToolResults(c);
+  assert.match(c[3].content, /call the tool again if you need it\]$/);
+  // An in-band failure payload is kept even without a record.
+  const d = history('get_emails', '{"success":false,"error":"API call failed: InternalServerError",' + '"x":"' + 'y'.repeat(3000) + '"}');
+  assert.equal(elideOldToolResults(d), 0);
+  // Tool-call pairing is intact in every case.
+  for (const m of [a, b, c, d]) assert.equal(m[3].tool_call_id, 'x1');
 });

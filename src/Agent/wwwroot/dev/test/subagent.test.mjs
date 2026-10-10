@@ -221,3 +221,31 @@ test('system prompt: artifact lines only when analysis is on', () => {
   assert.doesNotMatch(buildSystemPrompt(null), /# Large results/);
   assert.match(buildSystemPrompt({ accounts: [{ handle: 'a', role: 'SysAdmin' }, { handle: 'b', role: 'User' }] }, { artifacts: true }), /analyze_result/);
 });
+
+test('without module workers the operator path is refused before any request; the direct path still runs', async () => {
+  const { defaultRunner, supportsModuleWorkers, NO_WORKER_ERROR } = await import('../../js/subagent.js');
+  // Node has no global Worker: the browser default must not fall back to the page thread.
+  assert.equal(typeof globalThis.Worker, 'undefined');
+  assert.equal(defaultRunner({ kind: 'text', body: 'x' }), null);
+  assert.equal(supportsModuleWorkers(undefined), false);
+  assert.equal(supportsModuleWorkers(class { constructor() { throw new TypeError('bad url'); } }), false);
+  assert.equal(supportsModuleWorkers(class { constructor(url, opts) { void opts.type; throw new TypeError('bad url'); } }), true);
+
+  const store = new ArtifactStore({ threshold: 10 });
+  const { artifact } = store.capture('search_log_files', {}, { isError: false, content: logResult(bigLog(400)) });
+  const sent = [];
+  const refused = await analyzeResult({
+    artifact, question: 'How many 550s?', apiKey: 'k', model: 'm', createRunner: defaultRunner,
+    streamImpl: scripted([], sent)
+  });
+  assert.equal(refused.isError, true);
+  assert.equal(refused.content, NO_WORKER_ERROR);
+  assert.equal(sent.length, 0, 'nothing sent to the analysis model');
+
+  const direct = await analyzeResult({
+    artifact, question: 'What happened to user12?', apiKey: 'k', model: 'm', createRunner: defaultRunner,
+    streamImpl: scripted([{ content: 'Delivered.' }], sent)
+  });
+  assert.equal(direct.isError, false);
+  assert.equal(direct.mode, 'direct');
+});

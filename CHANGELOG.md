@@ -61,6 +61,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Agent: old tool results from write tools and failed calls are never elided from the chat history,
+  so the model is not nudged into repeating a change; an elided result of unknown kind says a change
+  it made was already made.
+- Agent: the approval review shows invisible and direction-changing characters as `⟦U+XXXX⟧` markers
+  with a warning and flags non-ASCII characters in addresses (display only; the hash is unchanged).
+- Agent: approving a change that sends mail (`send_*`, `forward_*`, `reply_*`, meeting responses,
+  calendar invitations, content filters that can forward) needs a passkey too.
+- Agent: a mail server that is slow while an approved change's account is restored leaves the proposal
+  pending (`503 ACCOUNT_UNAVAILABLE`) instead of `unknown`; decided proposals are deleted after 30 days
+  (newest 200 per profile kept); a repeated proposal moves to the newer run and only tightens its
+  passkey requirement; a failed run still records its proposals.
+- Agent: Test probe and Run now have their own per-server budget and a per-profile cap
+  (`PROBES_PER_PROFILE_PER_MINUTE`, default 6), so they cannot starve scheduled probes;
+  `POST /api/tasks/{id}/run` is rate-limited; a condition may contain at most one `new` check.
+- Agent: analyze_result's operator timeout starts after the artifact has loaded into the worker (30 s
+  load limit of its own); browsers without module workers get a refusal instead of running patterns
+  on the page thread. The task editor takes the artifact threshold from `/api/config`.
+- Agent (server mode with tasks off, or no `DATA_KEY`): task, approval and probe endpoints answer
+  `404 TASKS_DISABLED` / `TRIGGERS_DISABLED` instead of 500.
+- Every `domain_*` result now also hides token and credential fields, as documented.
 - **Security:** `get_dkim_settings` (sysadmin) returned the whole domain-settings response when it
   could not find its DKIM section, including authentication-provider secrets such as an LDAP
   password, which then went to the user's LLM provider. It now returns only the DKIM fields, or an

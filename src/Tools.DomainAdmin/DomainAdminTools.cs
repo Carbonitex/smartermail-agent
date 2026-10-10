@@ -318,7 +318,7 @@ public sealed class DomainAdminTools
         return JsonSerializer.SerializeToElement(node);
     }
 
-    private static readonly string[] SecretKeyFragments = ["password", "secret", "apikey", "privatekey"];
+    private static readonly string[] SecretKeyFragments = SmarterMailMcp.Core.SecretRedactor.DefaultFragments;
 
     private static void RedactNode(JsonNode? node) =>
         SmarterMailMcp.Core.SecretRedactor.RedactNode(node, SecretKeyFragments);

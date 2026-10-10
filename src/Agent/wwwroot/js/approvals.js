@@ -19,7 +19,8 @@ import { loadView, currentView } from './profile-ui.js';
 import { assertPasskey, passkeyErrorMessage } from './passkey.js';
 import { prettyJson } from './markdown.js';
 import {
-  proposalHash, argumentRows, formatRemaining, defaultApprovalMode, statusText, groupByRun
+  proposalHash, argumentRows, formatRemaining, defaultApprovalMode, statusText, groupByRun,
+  revealText, revealWarning
 } from './approvals-core.js';
 
 const NOTE_WARNING = 'Written by the AI. It read mail that anyone can send, so this may be wrong or planted.';
@@ -142,7 +143,8 @@ function card(p, view, body, ctx) {
   who.append(whoText, badge(d.readOnly ? 'read-only' : 'read-write', d.readOnly ? 'ok' : 'warn'));
   el.append(who);
 
-  // The arguments, verbatim.
+  // The arguments, verbatim, with hidden characters made visible (display only;
+  // the hash below is over d.argsJson itself).
   el.append(argumentsTable(d.argsJson));
   const raw = document.createElement('details');
   raw.className = 'approval-raw';
@@ -150,9 +152,10 @@ function card(p, view, body, ctx) {
   rawSum.textContent = 'Raw JSON (exactly what runs)';
   const rawPre = document.createElement('pre');
   rawPre.className = 'code';
-  rawPre.textContent = d.argsJson;
+  const rawWarning = reveal(rawPre, d.argsJson);
   raw.append(rawSum, rawPre);
   el.append(raw);
+  if (rawWarning) raw.open = true;
 
   // The model's note, last, as untrusted text.
   if (d.note) {
@@ -162,8 +165,9 @@ function card(p, view, body, ctx) {
     label.textContent = NOTE_WARNING;
     const text = document.createElement('p');
     text.className = 'approval-note-text';
-    text.textContent = d.note;
+    const noteWarning = reveal(text, d.note);
     note.append(label, text);
+    if (noteWarning) note.append(warningLine(noteWarning));
     el.append(note);
   }
 
@@ -279,7 +283,7 @@ function decidedRow(p) {
     sum.textContent = 'Details';
     const pre = document.createElement('pre');
     pre.className = 'code';
-    pre.textContent = (d ? `${d.argsJson}` : '') + (p.openedResult?.content ? `\n\n${prettyJson(p.openedResult.content)}` : '');
+    reveal(pre, (d ? `${d.argsJson}` : '') + (p.openedResult?.content ? `\n\n${prettyJson(p.openedResult.content)}` : ''));
     details.append(sum, pre);
     row.append(details);
   }
@@ -293,8 +297,11 @@ function argumentsTable(argsJson) {
   if (!rows) {
     const pre = document.createElement('pre');
     pre.className = 'code';
-    pre.textContent = argsJson;
-    return pre;
+    const warning = reveal(pre, argsJson);
+    if (!warning) return pre;
+    const wrap = div('approval-args-raw');
+    wrap.append(pre, warningLine(warning));
+    return wrap;
   }
   if (!rows.length) {
     const tr = table.insertRow();
@@ -304,14 +311,46 @@ function argumentsTable(argsJson) {
     const tr = table.insertRow();
     const k = tr.insertCell();
     k.className = 'approval-arg-key';
-    k.textContent = r.key;
+    const keyWarning = reveal(k, r.key);
     const v = tr.insertCell();
     const value = document.createElement(r.kind === 'json' || r.kind === 'long' ? 'pre' : 'span');
     value.className = `approval-arg-value ${r.kind}`;
-    value.textContent = r.text;
+    const warning = reveal(value, r.text, { address: r.kind === 'address' });
     v.append(value);
+    if (warning || keyWarning) {
+      tr.classList.add('suspicious');
+      v.append(warningLine(warning || keyWarning));
+    }
   }
   return table;
+}
+
+/**
+ * Fill `node` with `text` so that nothing in it hides: invisible and
+ * direction-changing characters become ⟦U+XXXX⟧ markers, and in an address
+ * every non-ASCII character is marked (look-alike letters). Text nodes only,
+ * never HTML. Returns the warning to show, or null.
+ */
+function reveal(node, text, { address = false } = {}) {
+  const r = revealText(text, { address });
+  node.replaceChildren(...r.parts.map((part) => {
+    if (part.kind === 'text') return document.createTextNode(part.text);
+    const mark = document.createElement('span');
+    mark.className = part.kind === 'hidden' ? 'char-hidden' : 'char-nonascii';
+    mark.textContent = part.text;
+    mark.title = part.kind === 'hidden'
+      ? `${part.code}: an invisible or direction-changing character`
+      : `${part.code}: not a plain ASCII letter`;
+    return mark;
+  }));
+  return revealWarning(r);
+}
+
+function warningLine(text) {
+  const p = document.createElement('p');
+  p.className = 'approval-arg-warning';
+  p.textContent = text;
+  return p;
 }
 
 /* --------------------------------------------------------------- editor */

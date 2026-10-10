@@ -55,6 +55,9 @@ public sealed class TaskRunner(
         TaskDefinition? definition = null;
         ProfileRow? profile = null;
         var emailed = false;
+        ApprovalQueue? approvals = null;
+        ToolGate? gate = null;
+        var proposalsRecorded = false;
 
         try
         {
@@ -86,9 +89,9 @@ public sealed class TaskRunner(
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stopping);
                 timeout.CancelAfter(options.TaskTimeout);
 
-                var approvals = services.GetRequiredService<ApprovalQueue>();
+                approvals = services.GetRequiredService<ApprovalQueue>();
                 ArgumentNullException.ThrowIfNull(definition);
-                var gate = approvals.GateFor(definition, profile!, task.Id, runId, dryRun);
+                gate = approvals.GateFor(definition, profile!, task.Id, runId, dryRun);
                 var context = new TaskToolContext(accounts, runtime, gate);
                 var zone = TaskDefinition.TryParseSchedule(definition.Cron, definition.TimeZone, out _, out var z) ? z : TimeZoneInfo.Utc;
                 if (definition.Trigger is not null)
@@ -122,6 +125,7 @@ public sealed class TaskRunner(
                 };
 
                 var approvalFooter = approvals.Finish(runId, gate, zone);
+                proposalsRecorded = true;
                 if (status == "ok" && !dryRun && definition.EmailAccountId is { } emailId &&
                     accounts.FirstOrDefault(a => a.Id == emailId) is { } mailbox)
                 {
@@ -145,6 +149,19 @@ public sealed class TaskRunner(
         }
         finally
         {
+            // A run that threw after proposing still says how many proposals it made.
+            if (!proposalsRecorded && approvals is not null && gate is not null)
+            {
+                try
+                {
+                    approvals.Record(runId, gate);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Task {Task}: could not record the run's proposals.", task.Id);
+                }
+            }
+
             if (result is null)
             {
                 var transcript = profile is not null && definition is not null

@@ -546,6 +546,29 @@ export function addUsage(total, u) {
 export const ELIDE_THRESHOLD = 2000;
 
 /**
+ * What runTurn knew about each tool message it pushed: `{ name, write, error }`.
+ * A WeakMap, not a property on the message, because the messages go to the
+ * provider as they are and an unknown field could be refused.
+ */
+const RESULT_META = new WeakMap();
+
+/** What runTurn recorded for a tool message (tests, diagnostics), or null. */
+export function toolResultMeta(message) {
+  return (message && RESULT_META.get(message)) || null;
+}
+
+/**
+ * Names that only read: used when nothing better is known about where an old
+ * result came from (no runTurn record and no `isWrite` answer). Every tool in
+ * docs/tools.md with one of these prefixes is a read; anything else is
+ * treated as a possible write.
+ */
+const READ_NAME = /^(domain_)?(get|list|search|check|read|download|expand|count|find)_|^analyze_result$/;
+
+/** An in-band failure the server would flag (ToolInvoker.PayloadIndicatesFailure). */
+const FAILURE_PAYLOAD = /^\s*\{\s*"success"\s*:\s*false\b/;
+
+/**
  * Replace large tool results from earlier turns with a short stub, in place.
  *
  * A turn starts at a user message. The current turn and the `keepTurns` turns
@@ -554,17 +577,28 @@ export const ELIDE_THRESHOLD = 2000;
  * a stub naming the tool, which the model can simply call again. Only the
  * model-facing history changes: the tool cards keep the full result.
  *
+ * Never elided: results of **write** tools and **error** results. A stub that
+ * says "call the tool again" next to a write invites the model to repeat a
+ * change (move_emails, domain_create_user…) when the user asks "did that
+ * work?", and an elided error hides that it failed. Write-ness comes from
+ * runTurn's record (its `isWrite`, i.e. the tool list's `write` flag), then
+ * from `isWrite(name)` here, then from the name: only a read-looking name gets
+ * the "call it again" stub; an unknown one gets a stub that says a change it
+ * made was already made and must not be repeated.
+ *
  * Caching: run this once, when a user turn starts, never between the rounds of
  * a turn, so every round within a turn sends a byte-identical prefix. The edit
- * is permanent and idempotent (a stub is far under the threshold), so a later
- * turn never rewrites it again; each turn boundary invalidates at most the
- * cached conversation from the first newly elided message on, while the
- * tools + system breakpoint stays warm. tool_call ids and the tool messages
- * themselves are untouched, so every call keeps its answer.
+ * is permanent and idempotent (a stub is far under the threshold, and what is
+ * kept is decided from facts fixed when the result arrived), so a later turn
+ * never rewrites it again; each turn boundary invalidates at most the cached
+ * conversation from the first newly elided message on, while the tools +
+ * system breakpoint stays warm. tool_call ids and the tool messages themselves
+ * are untouched, so every call keeps its answer.
  *
+ * @param {{threshold?:number, keepTurns?:number, isWrite?:(name:string)=>boolean|undefined}} [options]
  * @returns {number} how many results were replaced
  */
-export function elideOldToolResults(messages, { threshold = ELIDE_THRESHOLD, keepTurns = 1 } = {}) {
+export function elideOldToolResults(messages, { threshold = ELIDE_THRESHOLD, keepTurns = 1, isWrite = null } = {}) {
   if (!Array.isArray(messages)) return 0;
   const users = [];
   messages.forEach((m, i) => { if (m && m.role === 'user') users.push(i); });
@@ -583,8 +617,20 @@ export function elideOldToolResults(messages, { threshold = ELIDE_THRESHOLD, kee
     if (m.role !== 'tool' || typeof m.content !== 'string' || m.content.length <= threshold) continue;
     // An artifact stub is already small and is the model's only handle on the artifact.
     if (isArtifactStub(m.content)) continue;
-    const name = names.get(m.tool_call_id) || 'a tool';
-    m.content = `[earlier result of ${name} (${m.content.length.toLocaleString('en-US')} chars) omitted to save context; call the tool again if you need it]`;
+    const meta = RESULT_META.get(m) || null;
+    const name = names.get(m.tool_call_id) || (meta && meta.name) || 'a tool';
+    if (meta && meta.error) continue;
+    if (!meta && FAILURE_PAYLOAD.test(m.content)) continue;
+    let write = meta && typeof meta.write === 'boolean' ? meta.write : undefined;
+    if (write === undefined && typeof isWrite === 'function') {
+      const w = isWrite(name);
+      if (typeof w === 'boolean') write = w;
+    }
+    if (write === true) continue;
+    const chars = m.content.length.toLocaleString('en-US');
+    m.content = write === false || READ_NAME.test(name)
+      ? `[earlier result of ${name} (${chars} chars) omitted to save context; call the tool again if you need it]`
+      : `[earlier result of ${name} (${chars} chars) omitted to save context; if this call changed something, that change was already made: do not repeat it]`;
     n++;
   }
   return n;
@@ -739,7 +785,10 @@ export async function streamCompletion({
  * a stub; without one every result is clamped as before.
  *
  * Before the first request, large tool results from older turns are replaced
- * with stubs (elideOldToolResults; `elide: false` turns that off). Resolves
+ * with stubs (elideOldToolResults; `elide: false` turns that off). `isWrite`
+ * (name => boolean, from the tool list's `write` flag) is recorded with each
+ * result as it arrives, together with its error flag, so a write's or a
+ * failure's result is never elided later, even if the tool list changes. Resolves
  * with `{ rounds, stopped, usage }`, `usage` summed over the turn's requests
  * (null if none reported any).
  */
@@ -756,6 +805,7 @@ export async function runTurn({
   url,
   sessionId,
   elide = true,
+  isWrite = null,
   ui = {},
   streamImpl = streamCompletion
 }) {
@@ -763,7 +813,7 @@ export async function runTurn({
   let stopped = false;
   let usage = null;
 
-  if (elide) elideOldToolResults(messages);
+  if (elide) elideOldToolResults(messages, { isWrite });
 
   for (;;) {
     if (ui.onAssistantStart) ui.onAssistantStart();
@@ -847,7 +897,14 @@ export async function runTurn({
       const kept = artifacts
         ? artifacts.capture(call.name, call.args, result, clampToolResult)
         : { content: clampToolResult(result.content), artifact: null };
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: kept.content });
+      const toolMessage = { role: 'tool', tool_call_id: tc.id, content: kept.content };
+      let write;
+      if (typeof isWrite === 'function') {
+        const w = isWrite(call.name);
+        if (typeof w === 'boolean') write = w;
+      }
+      RESULT_META.set(toolMessage, { name: call.name, write, error: !!(result && result.isError) });
+      messages.push(toolMessage);
       if (ui.onToolEnd) ui.onToolEnd(call, result, kept.artifact);
     }
 

@@ -220,6 +220,32 @@ public sealed class TriggerLogicTests
     }
 
     [Fact]
+    public void Interactive_probes_have_their_own_buckets_per_profile_and_per_server()
+    {
+        var clock = new ManualClock(T0);
+        var options = new TriggerOptions { ProbesPerHostPerMinute = 10, InteractivePerProfilePerMinute = 3 };
+        Assert.Equal(2, options.InteractivePerHostPerMinute);                                  // a fifth, at least 1
+        Assert.Equal(1, new TriggerOptions { ProbesPerHostPerMinute = 1 }.InteractivePerHostPerMinute);
+
+        var limiter = new InteractiveProbeLimiter(options, clock);
+        var scheduled = new ProbeHostBucket(options, clock);
+        Assert.Null(limiter.TryTake("p1", "https://mail.example.com"));
+        Assert.Null(limiter.TryTake("p1", "https://mail.example.com"));
+        Assert.Equal(InteractiveProbeLimiter.HostMessage, limiter.TryTake("p2", "https://mail.example.com"));   // the server's share is spent
+        Assert.Null(limiter.TryTake("p1", "https://other.example.com"));                     // p1's third
+        Assert.Equal(InteractiveProbeLimiter.ProfileMessage, limiter.TryTake("p1", "https://third.example.com"));
+        Assert.Null(limiter.TryTake("p2", "https://other.example.com"));                     // p2's refused try was given back
+
+        // Scheduled probes never saw any of that.
+        for (var i = 0; i < 10; i++)
+            Assert.True(scheduled.TryTake("https://mail.example.com"));
+        Assert.False(scheduled.TryTake("https://mail.example.com"));
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Null(limiter.TryTake("p2", "https://mail.example.com"));
+    }
+
+    [Fact]
     public void Alert_mail_is_plain_clamped_and_free_of_control_characters()
     {
         var evaluation = new Predicate.Evaluation(true,
@@ -653,6 +679,32 @@ public sealed class TriggerProberTests
     }
 
     [Fact]
+    public async Task Run_now_draws_from_the_interactive_buckets_never_the_scheduled_one()
+    {
+        // 5 per server for scheduled probes; the interactive share is 1, and 2 per profile.
+        using var host = new TriggerHost(("PROBES_PER_HOST_PER_MINUTE", "5"), ("PROBES_PER_PROFILE_PER_MINUTE", "2")).WithProfile();
+        var admin = host.AddAccount("admin");
+        var me = host.AddAccount("me@example.com");
+        var definition = TriggerHost.Def([admin.Id, me.Id], TriggerHost.Trigger(admin.Id, "get_spool_message_counts", SpoolOver500), email: me.Id);
+        var taskId = host.AddTask(definition);
+        host.Api.Json(TriggerHost.CountsPath, "{\"success\":true,\"waiting\":2}");
+
+        var first = await host.Prober.RunNowAsync(host.Tasks.Get(host.ProfileId, taskId)!, definition, dryRun: true, CancellationToken.None);
+        Assert.Null(first.Code);
+        var second = await host.Prober.RunNowAsync(host.Tasks.Get(host.ProfileId, taskId)!, definition, dryRun: true, CancellationToken.None);
+        Assert.Equal("PROBE_THROTTLED", second.Code);
+        Assert.Equal(InteractiveProbeLimiter.HostMessage, second.Message);
+
+        // The scheduled bucket is untouched: five scheduled probes of the same server still go through.
+        var bucket = host.App.Services.GetRequiredService<ProbeHostBucket>();
+        for (var i = 0; i < 5; i++)
+            Assert.True(bucket.TryTake(admin.BaseUrl));
+        var http = typeof(SmarterMailAgent.Controllers.TasksController).GetMethod(nameof(SmarterMailAgent.Controllers.TasksController.Run))!;
+        Assert.Equal("api", Assert.Single(http.GetCustomAttributes(typeof(Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute), false)
+            .Cast<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()).PolicyName);
+    }
+
+    [Fact]
     public async Task A_tampered_write_probe_is_refused_and_pauses_the_task_at_once()
     {
         using var host = new TriggerHost().WithProfile();
@@ -721,6 +773,8 @@ public sealed class TriggerProberTests
         Assert.Single(new[] { a, b }, id => status[id].LastProbeAt is not null);     // one probed
         var deferred = new[] { a, b }.Single(id => status[id].LastProbeAt is null);
         Assert.Equal(0, status[deferred].ProbeFailures);                              // the other waits, no failure
+        Assert.Equal(1, host.Prober.Deferrals(deferred));                             // counted for the task card
+        Assert.Equal(0, host.Prober.Deferrals(new[] { a, b }.Single(id => id != deferred)));
         Assert.True(status[deferred].NextProbeAt < DateTimeOffset.UtcNow.AddMinutes(1));
         Assert.Single(host.Api.Requests, r => r.Path == TriggerHost.CountsPath);
     }

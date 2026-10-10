@@ -1996,6 +1996,12 @@ async function drive() {
       url: completionsUrl(),
       sessionId: conversationId(),
       callTool: (name, args) => api.callTool(name, args),
+      // A write's result is never elided from history (elideOldToolResults): asked "did that
+      // work?", the model must not re-run it. The full list, so a switched-off group still counts.
+      isWrite: (name) => {
+        const t = state.toolList.find((x) => x && x.name === name);
+        return t ? t.write === true : undefined;
+      },
       // analyze_result never reaches the server: it runs here, on this tab's artifacts.
       localTools: { [ANALYZE_RESULT_TOOL.name]: (args, call) => analyzeLocally(args, call, cards, controller.signal) },
       artifacts: analysisOn() ? state.artifacts : null,

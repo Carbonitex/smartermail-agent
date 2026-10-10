@@ -8,7 +8,9 @@
  * content-versioned asset path (./v/<version>/js/) like every other module.
  *
  * Messages in:  { type: 'load', kind, body, meta } then { type: 'op', id, op, args }
- * Messages out: { id, ok: true, text } or { id, ok: false, error }
+ * Messages out: { id, ok: true, text } or { id, ok: false, error }; the load
+ * is answered too (id 'load'), and the page starts an operator's timeout only
+ * after that answer.
  */
 
 import { prepare, runOp } from './artifact-ops.js';
@@ -19,7 +21,13 @@ let data = null;
 export function handleMessage(msg) {
   if (!msg || typeof msg !== 'object') return { id: null, ok: false, error: 'Bad message.' };
   if (msg.type === 'load') {
-    data = prepare(msg.kind, msg.body, msg.meta || {});
+    // The page waits for this answer before it starts any operator's clock.
+    try {
+      data = prepare(msg.kind, msg.body, msg.meta || {});
+    } catch (e) {
+      data = null;
+      return { id: msg.id ?? null, ok: false, error: (e && e.message) || String(e) };
+    }
     return { id: msg.id ?? null, ok: true, text: '' };
   }
   if (msg.type === 'op') {

@@ -64,6 +64,13 @@ export const serverMode = () => !!(config && config.mode === 'server' && config.
 export const tasksEnabled = () => serverMode() && !!config.tasks?.enabled;
 export const taskLimits = () => config?.tasks || {};
 
+/** Results over this many characters become artifacts: /api/config `analysis.artifactThresholdChars`, else 20,000. */
+export const ARTIFACT_THRESHOLD_FALLBACK = 20000;
+export function artifactThreshold(cfg = config) {
+  const n = cfg?.analysis?.artifactThresholdChars;
+  return Number.isFinite(n) && n > 0 ? n : ARTIFACT_THRESHOLD_FALLBACK;
+}
+
 /** This page holds the profile's keys (settings can be saved, task results opened). */
 export const hasKeys = () => !!keys;
 

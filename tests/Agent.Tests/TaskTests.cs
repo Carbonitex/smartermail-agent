@@ -55,6 +55,13 @@ internal sealed class FakeLlm : HttpMessageHandler
         usage = new { prompt_tokens = 100, completion_tokens = 10 },
     });
 
+    /// <summary>The next request fails with something no LLM client code expects (the run's loop throws).</summary>
+    public FakeLlm Throw()
+    {
+        _script.Enqueue(_ => throw new InvalidOperationException("unexpected failure"));
+        return this;
+    }
+
     public FakeLlm Final(string text) => Reply(new
     {
         choices = new[] { new { finish_reason = "stop", message = new { role = "assistant", content = text } } },

@@ -704,7 +704,7 @@ public sealed class DomainSecurityTools
             : $"{trimmed}@{userContext.Domain}";
     }
 
-    private static readonly string[] SecretKeyFragments = ["password", "secret", "apikey", "privatekey", "activationkey"];
+    private static readonly string[] SecretKeyFragments = SmarterMailMcp.Core.SecretRedactor.DefaultFragments;
 
     /// <summary>Blanks non-empty strings under password/secret/private-key-like property names.</summary>
     private static void RedactNode(JsonNode? node) =>

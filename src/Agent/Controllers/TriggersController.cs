@@ -17,7 +17,8 @@ namespace SmarterMailAgent.Controllers;
 /// <c>POST /api/tasks/probe</c>: the editor's "Test probe". Calls a read tool now, as one of the
 /// session's own live accounts (delegated or not), and evaluates an optional condition against the
 /// result. Reading is what this cookie can already do through <c>/api/tools/call</c>; nothing is stored.
-/// Cookie only, unlocked profile session, <c>api</c> limiter, and the per-server probe bucket.
+/// Cookie only, unlocked profile session, <c>api</c> limiter, and the interactive probe buckets
+/// (<see cref="InteractiveProbeLimiter"/>: per profile and per mail server, apart from scheduled probes).
 /// </summary>
 [ApiController]
 [Route("api/tasks/probe")]
@@ -64,11 +65,10 @@ public sealed class TriggersController(
         if (argumentErrors.Count > 0)
             return Invalid(argumentErrors);
 
-        if (services.GetService<ProbeHostBucket>() is { } bucket && !bucket.TryTake(account.BaseUrl))
-        {
-            return StatusCode(StatusCodes.Status429TooManyRequests,
-                new { error = "That mail server has had too many checks this minute. Try again shortly.", code = "PROBE_THROTTLED" });
-        }
+        // Interactive probes have their own buckets (per profile, and a per-server share), so they never
+        // spend what the scheduled probes need.
+        if (services.GetService<InteractiveProbeLimiter>()?.TryTake(runtime.ProfileId, account.BaseUrl) is { } throttled)
+            return StatusCode(StatusCodes.Status429TooManyRequests, new { error = throttled, code = "PROBE_THROTTLED" });
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
         timeout.CancelAfter(triggerOptions.ProbeTimeout);

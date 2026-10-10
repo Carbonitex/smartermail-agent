@@ -151,3 +151,54 @@ test('worker runner: a catastrophic pattern is stopped and the next call still w
     runner.close();
   }
 });
+
+/** A thread worker whose load takes `loadMs` (blocking, like copying 16 MB on a slow phone), or never answers. */
+const slowLoadWorker = (loadMs) => new Worker(`
+  const { parentPort } = require('node:worker_threads');
+  import(${JSON.stringify(new URL('../../js/artifact-worker.js', import.meta.url).href)}).then(({ handleMessage }) => {
+    parentPort.on('message', (m) => {
+      if (m.type === 'load') {
+        if (${loadMs} < 0) { handleMessage(m); return; }          // loads, never answers
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${loadMs});
+      }
+      parentPort.postMessage(handleMessage(m));
+    });
+  });
+`, { eval: true });
+
+test('worker runner: a slow artifact load does not count against the operator timeout', async () => {
+  const artifact = { handle: 'r1', tool: 't', kind: 'text', body: 'ok line\nother\n', truncated: false, originalChars: 0, chars: 15 };
+  const runner = createWorkerRunner(artifact, { timeoutMs: 300, loadTimeoutMs: 5000, createWorker: () => slowLoadWorker(900) });
+  try {
+    const r = await runner.run('artifact_grep', { pattern: 'ok' });
+    assert.equal(r.ok, true, r.error);
+    assert.match(r.text, /^1 matching lines of 2\n#1: ok line$/);
+  } finally {
+    runner.close();
+  }
+});
+
+test('worker runner: a load that never finishes gets its own error, once, and is not blamed on the pattern', async () => {
+  const artifact = { handle: 'r1', tool: 't', kind: 'text', body: 'x\n', truncated: false, originalChars: 0, chars: 2 };
+  let created = 0;
+  const runner = createWorkerRunner(artifact, { timeoutMs: 200, loadTimeoutMs: 400, createWorker: () => { created++; return slowLoadWorker(-1); } });
+  try {
+    const first = await runner.run('artifact_info', {});
+    assert.equal(first.ok, false);
+    assert.match(first.error, /did not finish loading into the analysis worker within 0.4 s/);
+    assert.doesNotMatch(first.error, /backtrack/);
+    const started = Date.now();
+    const second = await runner.run('artifact_info', {});
+    assert.equal(second.error, first.error);
+    assert.ok(Date.now() - started < 100, 'a failed load is final: no second wait');
+    assert.equal(created, 1);
+  } finally {
+    runner.close();
+  }
+});
+
+test('worker message handler: a load that throws is answered, not crashed', () => {
+  const r = handleMessage({ type: 'load', id: 'load', kind: 'text', body: { toString() { throw new Error('boom'); } }, meta: {} });
+  assert.deepEqual(r, { id: 'load', ok: false, error: 'boom' });
+  assert.equal(handleMessage({ type: 'op', id: 1, op: 'artifact_info' }).ok, false, 'nothing half-loaded is kept');
+});

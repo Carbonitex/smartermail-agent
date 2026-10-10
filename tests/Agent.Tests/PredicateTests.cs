@@ -270,6 +270,23 @@ public sealed class PredicateTests
         Assert.False(P("{ \"path\": \"a\", \"op\": \"exists\" }").UsesNew);
     }
 
+    [Fact]
+    public void At_most_one_new_node_per_predicate()
+    {
+        // One set of seen keys per task: a second "new" would share it.
+        var errors = Errors("""
+            { "any": [ { "new": { "items": "$.emails[*]" } }, { "not": { "new": { "items": "$.users[*]" } } } ] }
+            """);
+        var error = Assert.Single(errors);
+        Assert.StartsWith("when.any[1].not:", error);
+        Assert.Contains("when.any[0]", error);
+
+        // Nested inside the first one's where, too.
+        Assert.Contains(Errors("""{ "new": { "items": "$.a[*]", "where": { "new": { "items": "$.b[*]" } } } }"""),
+            e => e.StartsWith("when.new.where:", StringComparison.Ordinal));
+        Assert.True(P("""{ "all": [ { "new": { "items": "$.emails[*]" } }, { "path": "$.ok", "op": "exists" } ] }""").UsesNew);
+    }
+
     // ------------------------------------------------------------------ limits
 
     [Fact]

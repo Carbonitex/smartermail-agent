@@ -48,15 +48,18 @@ if (serverOptions.ServerMode)
     builder.Services.AddSingleton<ProfileRegistry>();
     builder.Services.AddSingleton<PasskeyService>();
     builder.Services.AddHostedService<ProfileMaintenance>();
+    // The stores are plain views of the database: registered whenever server mode is on, so the task,
+    // approval and trigger controllers can be built and answer 404 TASKS_DISABLED themselves.
+    builder.Services.AddSingleton<TaskStore>();
+    builder.Services.AddSingleton<ProposalStore>();
+    builder.Services.AddSingleton<TriggerStore>();
     if (serverOptions.TasksEnabled)
     {
-        builder.Services.AddSingleton<TaskStore>();
         builder.Services.AddHttpClient<OpenRouterClient>(http => http.Timeout = TimeSpan.FromMinutes(3));
         builder.Services.AddSingleton<AgentLoop>();
         builder.Services.AddSingleton<TaskRunner>();
         builder.Services.AddTaskRunScheduler();
         builder.Services.AddApprovals();
-        builder.Services.AddSingleton<TriggerStore>();
         if (triggerOptions.Enabled)
             builder.Services.AddTriggerProber();
     }

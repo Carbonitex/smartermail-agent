@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using SmarterMailAgent.Auth;
 using SmarterMailAgent.Mcp;
 using SmarterMailAgent.Profiles;
@@ -51,7 +52,12 @@ public sealed class TasksController(
             return refusal;
 
         var status = Triggers?.Status(profileId, DataStore.Now());
-        var list = tasks.ForProfile(profileId).Select(t => View(t, sealer, status?.GetValueOrDefault(t.Id))).ToList();
+        var prober = services.GetService<TriggerProber>();
+        var list = tasks.ForProfile(profileId)
+            .Select(t => View(t, sealer, status?.GetValueOrDefault(t.Id) is { } s
+                ? s with { Deferrals = prober?.Deferrals(t.Id) ?? 0 }
+                : null))
+            .ToList();
         return Ok(new { tasks = list, unread = tasks.UnreadCount(profileId), pending = services.GetRequiredService<ProposalStore>().PendingCount(profileId) });
     }
 
@@ -107,6 +113,7 @@ public sealed class TasksController(
 
     /// <summary>Starts a run now (in the background). <c>dryRun</c>: writes are simulated, nothing is mailed.</summary>
     [HttpPost("{id}/run")]
+    [EnableRateLimiting("api")]
     public async Task<IActionResult> Run(string id, [FromBody] RunRequest? request)
     {
         if (Gate(out var profileId, out var sealer) is { } refusal)

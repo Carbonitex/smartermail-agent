@@ -33,7 +33,84 @@ const ADDRESS_KEY = /^(to|cc|bcc|from|replyto|forwardto|forwardaddress|forwardin
 /** True for argument names that carry addresses, or values that look like one. */
 export function isAddress(key, value) {
   if (ADDRESS_KEY.test(String(key).replace(/[_-]/g, ''))) return true;
-  return typeof value === 'string' && /[^\s@]+@[^\s@]+\.[^\s@]+/.test(value);
+  if (typeof value !== 'string') return false;
+  // Hidden characters (some count as \s, e.g. U+FEFF) must not break an address up so it escapes the check.
+  const visible = [...value].filter((ch) => !isHiddenChar(ch)).join('');
+  return /[^\s@]+@[^\s@]+\.[^\s@]+/.test(visible);
+}
+
+/* ------------------------------------------------- characters that hide */
+
+/**
+ * Characters that change how text looks without looking like anything:
+ * controls (Cc, except tab and newline, which the review shows as layout),
+ * format characters (Cf: bidi embeddings / overrides / isolates U+202A–202E,
+ * U+2066–2069, zero-width U+200B–200F, U+2060–2064, U+FEFF, soft hyphen,
+ * tags…), private-use and lone surrogates, line / paragraph separators, every
+ * space but U+0020, and the blank-looking fillers and variation selectors.
+ * Text arguments are shown with each of these as a visible ⟦U+XXXX⟧ marker.
+ */
+const HIDDEN_CHAR = /^(?:(?![\t\n])\p{Cc}|\p{Cf}|\p{Co}|\p{Cs}|\p{Zl}|\p{Zp}|(?! )\p{Zs}|[\u034F\u115F\u1160\u17B4\u17B5\u180B-\u180F\u3164\uFFA0\uFE00-\uFE0F]|[\u{E0100}-\u{E01EF}])$/u;
+
+/** "U+202E" for a code point. */
+export function codePointLabel(cp) {
+  return `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+}
+
+/** True for a single character (code point) that would be invisible or reorder text. */
+export function isHiddenChar(ch) {
+  return HIDDEN_CHAR.test(ch);
+}
+
+/**
+ * Split text for display so nothing in it can hide or rearrange what the
+ * reviewer reads. Returns `{ parts, hidden, nonAscii }`:
+ *
+ *  - `parts`: `{ kind: 'text', text }`, `{ kind: 'hidden', text: '⟦U+202E⟧',
+ *    code }` in place of each hidden character, and (with `address`)
+ *    `{ kind: 'nonascii', text: <the character>, code }` for every non-ASCII
+ *    character, which look-alike addresses are made of (Cyrillic а for a…);
+ *  - `hidden`: how many hidden characters were replaced;
+ *  - `nonAscii`: the distinct non-ASCII code points' labels (address only).
+ *
+ * Display only: the hash is always over the original argsJson, untouched.
+ */
+export function revealText(text, { address = false } = {}) {
+  const s = String(text ?? '');
+  const parts = [];
+  const nonAscii = new Set();
+  let hidden = 0;
+  let run = '';
+  const flush = () => { if (run) { parts.push({ kind: 'text', text: run }); run = ''; } };
+  for (const ch of s) {
+    const cp = ch.codePointAt(0);
+    if (isHiddenChar(ch)) {
+      flush();
+      parts.push({ kind: 'hidden', text: `⟦${codePointLabel(cp)}⟧`, code: codePointLabel(cp) });
+      hidden++;
+    } else if (address && cp > 0x7e) {
+      flush();
+      parts.push({ kind: 'nonascii', text: ch, code: codePointLabel(cp) });
+      nonAscii.add(codePointLabel(cp));
+    } else {
+      run += ch;
+    }
+  }
+  flush();
+  return { parts, hidden, nonAscii: [...nonAscii] };
+}
+
+/**
+ * The warning to show next to a value, or null: hidden characters anywhere,
+ * non-ASCII characters in an address.
+ */
+export function revealWarning({ hidden, nonAscii }) {
+  const out = [];
+  if (hidden) out.push(`${hidden} hidden or direction-changing character${hidden === 1 ? '' : 's'}, shown as ⟦U+…⟧`);
+  if (nonAscii && nonAscii.length) {
+    out.push(`non-ASCII characters in an address (${nonAscii.slice(0, 6).join(', ')}${nonAscii.length > 6 ? ', …' : ''}): it may only look like the address you expect`);
+  }
+  return out.length ? `Check this value: ${out.join('; ')}.` : null;
 }
 
 /**
@@ -41,7 +118,8 @@ export function isAddress(key, value) {
  * order: { key, text, kind } where kind is 'empty' | 'address' | 'long' |
  * 'json' | 'plain'. `text` is the full value, never shortened: strings as
  * they are, everything else as indented JSON. Not a JSON object → null (the
- * caller shows the raw string instead).
+ * caller shows the raw string instead). The display goes through revealText
+ * (rows only describe the value; the hash is over argsJson itself).
  */
 export function argumentRows(argsJson) {
   let parsed;

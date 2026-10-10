@@ -118,3 +118,12 @@ test('formatSize', () => {
   assert.equal(formatSize(20480), '20 KB');
   assert.equal(formatSize(1500), '1,500 chars');
 });
+
+test('the task editor\'s artifact threshold comes from /api/config, with 20,000 as the fallback', async () => {
+  const { artifactThreshold, ARTIFACT_THRESHOLD_FALLBACK } = await import('../../js/profile.js');
+  assert.equal(ARTIFACT_THRESHOLD_FALLBACK, 20000);
+  assert.equal(artifactThreshold({ analysis: { artifactThresholdChars: 12345 } }), 12345);
+  assert.equal(artifactThreshold({ analysis: {} }), 20000);
+  assert.equal(artifactThreshold({ analysis: { artifactThresholdChars: 0 } }), 20000);
+  assert.equal(artifactThreshold(null), 20000);
+});

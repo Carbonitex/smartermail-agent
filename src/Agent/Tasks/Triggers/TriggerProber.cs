@@ -38,6 +38,7 @@ public sealed class TriggerProber(
     TaskRunScheduler scheduler,
     ToolDispatcher dispatcher,
     ProbeHostBucket bucket,
+    InteractiveProbeLimiter interactive,
     TriggerOptions options,
     ServerOptions server,
     IServiceProvider services,
@@ -49,7 +50,11 @@ public sealed class TriggerProber(
     private readonly ConcurrentDictionary<string, Task> _inFlight = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _holdFor = new(StringComparer.Ordinal);   // task id -> profile id
     private readonly Dictionary<string, ProfileRuntime> _held = new(StringComparer.Ordinal);       // profile id -> lease
+    private readonly ConcurrentDictionary<string, int> _deferrals = new(StringComparer.Ordinal);    // task id -> deferrals in a row
     private CancellationToken _stopping = CancellationToken.None;
+
+    /// <summary>Scheduled probes of <paramref name="taskId"/> deferred in a row for the mail server's probe budget (in memory).</summary>
+    public int Deferrals(string taskId) => _deferrals.GetValueOrDefault(taskId);
 
     /// <summary>The outcome of "Run now" on a condition task.</summary>
     public sealed record RunNowResult(string? RunId, string? Code, string? Message);
@@ -140,7 +145,11 @@ public sealed class TriggerProber(
     }
 
     /// <summary>The task was saved (its interval may have gone up, or it was disabled): the next reconcile decides about its lease.</summary>
-    public void Forget(string taskId) => _holdFor.TryRemove(taskId, out _);
+    public void Forget(string taskId)
+    {
+        _holdFor.TryRemove(taskId, out _);
+        _deferrals.TryRemove(taskId, out _);
+    }
 
     /// <summary>Releases the leases no enabled sub-15-minute trigger needs any more.</summary>
     internal async Task ReconcileLeasesAsync()
@@ -222,9 +231,11 @@ public sealed class TriggerProber(
         if (TriggerAccounts.BaseUrlOf(registry, profiles, task.ProfileId, accountId) is { } baseUrl && !bucket.TryTake(baseUrl))
         {
             triggers.Defer(task.Id, nowMs + (long)TaskRunScheduler.Tick.TotalMilliseconds);
-            logger.LogInformation("Task {Task} probe deferred: mail server probe budget spent.", task.Id);
+            var inARow = _deferrals.AddOrUpdate(task.Id, 1, (_, n) => n + 1);
+            logger.LogInformation("Task {Task} probe deferred ({Count} in a row): mail server probe budget spent.", task.Id, inARow);
             return;
         }
+        _deferrals.TryRemove(task.Id, out _);
 
         var runtime = registry.AcquireTask(task.ProfileId);
         try
@@ -475,8 +486,9 @@ public sealed class TriggerProber(
         try
         {
             var accountId = trigger.Probe?.AccountId ?? "";
-            if (TriggerAccounts.BaseUrlOf(registry, profiles, task.ProfileId, accountId) is { } baseUrl && !bucket.TryTake(baseUrl))
-                return new RunNowResult(null, "PROBE_THROTTLED", "That mail server has had too many checks this minute. Try again shortly.");
+            // A person's check: the interactive buckets, never the scheduled probes' one.
+            if (interactive.TryTake(task.ProfileId, TriggerAccounts.BaseUrlOf(registry, profiles, task.ProfileId, accountId)) is { } throttled)
+                return new RunNowResult(null, "PROBE_THROTTLED", throttled);
 
             var runtime = registry.AcquireTask(task.ProfileId);
             try
@@ -523,6 +535,7 @@ public static class TriggerProberExtensions
     {
         services.AddSingleton<ProbeRunner>();
         services.AddSingleton(sp => new ProbeHostBucket(sp.GetRequiredService<TriggerOptions>()));
+        services.AddSingleton(sp => new InteractiveProbeLimiter(sp.GetRequiredService<TriggerOptions>()));
         services.AddSingleton<TriggerProber>();
         services.AddHostedService(sp => sp.GetRequiredService<TriggerProber>());
         return services;
