@@ -395,3 +395,120 @@ public sealed class TaskInviteHttpTests : IDisposable
         Assert.Equal(ProfileStore.SealProfile, profiles.Accounts(profileId).Single().Seal);
     }
 }
+
+/// <summary>The Profile menu's Invites section: <c>/api/admin/*</c> for the profiles in <c>ADMIN_PROFILES</c> only.</summary>
+public sealed class TaskInviteAdminTests : IDisposable
+{
+    private const string AdminId = "admin-profile-0001";
+    private const string LockedAdminId = "admin-profile-0002";
+    private readonly StubSmarterMail _stub = new();
+    private readonly WebApplicationFactory<Program> _app;
+
+    public TaskInviteAdminTests()
+    {
+        _app = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("DATA_DIR", TestEnvironment.NewDataDir());
+            builder.UseSetting("DATA_KEY", Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+            builder.UseSetting("TASKS_ACCESS", "invite");
+            builder.UseSetting("ADMIN_PROFILES", $" {AdminId} , {LockedAdminId} ");
+            builder.ConfigureTestServices(services => services.AddSingleton(_stub.Auth()));
+        });
+    }
+
+    public void Dispose() => _app.Dispose();
+
+    /// <summary>A profile session for <paramref name="profileId"/>, unlocked or not.</summary>
+    private Session ProfileSession(string profileId, bool unlocked = true)
+    {
+        var store = _app.Services.GetRequiredService<ProfileStore>();
+        var accountsKey = RandomNumberGenerator.GetBytes(32);
+        var now = DataStore.Now();
+        store.CreateProfile(new ProfileRow(profileId, now, now, "pub", "priv", null, 0, ProfileCrypto.AccountsKeyCheck(accountsKey), null, null, null, false),
+            new PasskeyRow(ProfileCrypto.NewId(), profileId, [1], 0, null, null, "w", now, null), []);
+        var runtime = _app.Services.GetRequiredService<ProfileRegistry>().AcquireSession(profileId);
+        if (unlocked)
+            runtime.Unlock(accountsKey, store.GetProfile(profileId)!.AccountsKeyCheck);
+        return _app.Services.GetRequiredService<SessionStore>().CreateForProfile(runtime);
+    }
+
+    private async Task<HttpResponseMessage> Send(HttpMethod method, string path, Session? session, object? body = null, string? bearer = null)
+    {
+        using var client = _app.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        var request = new HttpRequestMessage(method, path);
+        if (session is not null)
+            request.Headers.Add("Cookie", $"{SessionStore.CookieName}={session.Id}");
+        if (bearer is not null)
+            request.Headers.Add("Authorization", $"Bearer {bearer}");
+        if (body is not null)
+            request.Content = JsonContent.Create(body);
+        return await client.SendAsync(request);
+    }
+
+    [Fact]
+    public async Task Only_an_unlocked_admin_profile_sees_the_endpoints()
+    {
+        var admin = ProfileSession(AdminId);
+        var locked = ProfileSession(LockedAdminId, unlocked: false);
+        var other = ProfileSession(ProfileCrypto.NewId());
+        var plain = _app.Services.GetRequiredService<SessionStore>().Create(ResumeFixtures.NewAccount(_stub.Auth()));
+
+        Assert.Equal(HttpStatusCode.OK, (await Send(HttpMethod.Get, "/api/admin/invites", admin)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(HttpMethod.Get, "/api/admin/invites", null)).StatusCode);
+        foreach (var session in new[] { other, plain })
+            Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Get, "/api/admin/invites", session)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Post, "/api/admin/invites", other, new { })).StatusCode);
+
+        // On the list, but not unlocked with its passkey.
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Get, "/api/admin/invites", locked)).StatusCode);
+
+        // An MCP token of the admin's own session is not a cookie.
+        var token = _app.Services.GetRequiredService<SessionStore>().IssueMcpToken(admin)!.Value.Token;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(HttpMethod.Get, "/api/admin/invites", null, bearer: token)).StatusCode);
+
+        var view = await (await Send(HttpMethod.Get, "/api/profile", admin)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(view.GetProperty("admin").GetBoolean());
+        view = await (await Send(HttpMethod.Get, "/api/profile", other)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(view.GetProperty("admin").GetBoolean());
+    }
+
+    [Fact]
+    public async Task An_admin_makes_a_code_someone_redeems_it_and_the_admin_revokes_them()
+    {
+        var admin = ProfileSession(AdminId);
+        var guest = ProfileSession(ProfileCrypto.NewId());
+
+        using (var bad = await Send(HttpMethod.Post, "/api/admin/invites", admin, new { uses = 0 }))
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+
+        var made = await (await Send(HttpMethod.Post, "/api/admin/invites", admin, new { note = " for\u0007 Sam ", uses = 2, days = 7 }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var code = made.GetProperty("code").GetString()!;
+        var inviteId = made.GetProperty("invite").GetProperty("id").GetString()!;
+        Assert.Equal("for Sam", made.GetProperty("invite").GetProperty("note").GetString());
+        Assert.Equal("open", made.GetProperty("invite").GetProperty("state").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, (await Send(HttpMethod.Post, "/api/profile/task-access", guest, new { code })).StatusCode);
+
+        var list = await (await Send(HttpMethod.Get, "/api/admin/invites", admin)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(list.GetProperty("inviteOnly").GetBoolean());
+        var invite = list.GetProperty("invites").EnumerateArray().Single();
+        Assert.Equal(1, invite.GetProperty("uses").GetInt32());
+        Assert.DoesNotContain(code, list.GetRawText());   // the code is never listed
+        var access = list.GetProperty("access").EnumerateArray().Single();
+        Assert.Equal(guest.Profile!.ProfileId, access.GetProperty("profileId").GetString());
+        Assert.Equal("for Sam", access.GetProperty("inviteNote").GetString());
+        Assert.False(access.GetProperty("you").GetBoolean());
+
+        Assert.Equal(HttpStatusCode.NoContent, (await Send(HttpMethod.Delete, $"/api/admin/access/{guest.Profile.ProfileId}", admin)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Delete, $"/api/admin/access/{guest.Profile.ProfileId}", admin)).StatusCode);
+        Assert.Null(_app.Services.GetRequiredService<ProfileStore>().GetProfile(guest.Profile.ProfileId)!.TaskAccessAt);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await Send(HttpMethod.Post, $"/api/admin/access/{AdminId}", admin)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Send(HttpMethod.Delete, $"/api/admin/invites/{inviteId}", admin)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Delete, "/api/admin/invites/nope", admin)).StatusCode);
+        list = await (await Send(HttpMethod.Get, "/api/admin/invites", admin)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("revoked", list.GetProperty("invites")[0].GetProperty("state").GetString());
+        Assert.True(list.GetProperty("access").EnumerateArray().Single().GetProperty("you").GetBoolean());
+    }
+}

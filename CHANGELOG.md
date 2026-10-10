@@ -42,6 +42,9 @@ All notable changes to this project are documented here. The format follows
   list and revoke codes, and grant or revoke a profile's access, with
   `dotnet SmarterMailAgent.dll invites …` / `access …` against the same `DATA_DIR`. The default,
   `open`, changes nothing. `POST /api/profile/task-access`.
+- Agent: profiles named in `ADMIN_PROFILES` get an "Invites (admin)" section in the Profile menu
+  (while unlocked): make, list and revoke invite codes, and revoke a profile's task access.
+  `/api/admin/*`, `404` for everyone else. Profile → Settings now shows the profile's ID.
 
 - `upload_attachment` takes the file as `base64Content` or `text` (with `fileName`), so remote
   clients can attach files they have. New `inline=true` embeds an image: SmarterMail assigns the

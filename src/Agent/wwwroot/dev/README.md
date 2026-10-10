@@ -43,6 +43,7 @@ Environment: `PORT` (default `8787`, `0` picks a free port and logs it),
 `RESUME` (default on; `false` hides "Remember me"), `RESUME_DAYS` (default `30`),
 `MODE=browser` (browser-only), `TASKS=false`, `TRIGGERS=false` (no condition tasks),
 `TASKS_ACCESS=invite` (tasks need an invite code; the stub's is `STUB-INVT-CODE-0000`),
+`ADMIN=1` (every profile is an admin: the Profile menu's Invites section, `/api/admin/*`),
 `SEED_PROFILE=1` (below).
 
 In a remembered session every tool call and account change bumps the resume

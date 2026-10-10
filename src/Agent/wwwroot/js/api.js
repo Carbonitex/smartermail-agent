@@ -336,6 +336,28 @@ export function redeemTaskInvite(code) {
   return request('/profile/task-access', { method: 'POST', body: { code } });
 }
 
+/* ---- admin (ADMIN_PROFILES only; 404 for everyone else) ---- */
+
+/** GET /api/admin/invites → { inviteOnly, invites: [{ id, note, uses, maxUses, state, createdAt, expiresAt }], access: [{ profileId, grantedAt, inviteId, inviteNote, lastSeenAt, you }] }. */
+export function adminInvites() {
+  return request('/admin/invites');
+}
+
+/** POST /api/admin/invites { note, uses, days } → { code, invite }: the code is returned only here. */
+export function adminCreateInvite(body) {
+  return request('/admin/invites', { method: 'POST', body });
+}
+
+/** DELETE /api/admin/invites/{id}[?profiles=true] → { profilesRevoked }. */
+export function adminRevokeInvite(id, profiles) {
+  return request('/admin/invites/' + encodeURIComponent(id) + (profiles ? '?profiles=true' : ''), { method: 'DELETE' });
+}
+
+/** DELETE /api/admin/access/{profileId} → 204: tasks paused, task key deleted, pending approvals denied. */
+export function adminRevokeAccess(profileId) {
+  return request('/admin/access/' + encodeURIComponent(profileId), { method: 'DELETE' });
+}
+
 /** PUT /api/profile/idle → the profile view; minutes null = the server default. 400 IDLE_OUT_OF_RANGE. */
 export function setProfileIdle(minutes) {
   return request('/profile/idle', { method: 'PUT', body: { minutes } });

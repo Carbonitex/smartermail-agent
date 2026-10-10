@@ -87,7 +87,8 @@ public sealed class ProfileController(
     public sealed record ProfileView(
         string Id, bool Unlocked, IReadOnlyList<PasskeyView> Passkeys, IReadOnlyList<StoredAccountView> Accounts,
         bool Recovery, string PublicKey, string EncryptedPrivateKey, long SettingsVersion,
-        bool CanDelegate, bool TasksEnabled, bool HasTaskKey, bool TasksPaused, IdleView Idle, TaskAccessView TaskAccess);
+        bool CanDelegate, bool TasksEnabled, bool HasTaskKey, bool TasksPaused, IdleView Idle, TaskAccessView TaskAccess,
+        bool Admin = false);
 
     // ------------------------------------------------------------------ creation
 
@@ -562,7 +563,8 @@ public sealed class ProfileController(
             profile.TasksPaused,
             new IdleView(store.IdleMinutes(profile.Id), (int)SessionStore.IdleTimeout.TotalMinutes,
                 ServerOptions.ProfileMinIdleMinutes, options.ProfileMaxIdleMinutes),
-            new TaskAccessView(options.TaskInviteOnly, options.AllowsTasks(profile)));
+            new TaskAccessView(options.TaskInviteOnly, options.AllowsTasks(profile)),
+            options.IsAdmin(profile.Id));
     }
 
     /// <summary>

@@ -123,6 +123,11 @@ docker exec <container> dotnet SmarterMailAgent.dll access grant <profileId>
 docker exec <container> dotnet SmarterMailAgent.dll access revoke <profileId>
 ```
 
+To do the same from the browser, put your own profile ID (shown under **Profile → Settings**) in
+`ADMIN_PROFILES`. While that profile is unlocked with its passkey, its Profile menu has an **Invites
+(admin)** section: make a code (shown once, with Copy), see and revoke codes, and see and revoke which
+profiles may use tasks. To everyone else the admin endpoints don't exist (`404`).
+
 A code is 16 characters (`XXXX-XXXX-XXXX-XXXX`, 80 random bits; case, spaces and dashes don't
 matter). It is good for one profile unless you set `--uses`, and never expires unless you set `--days`.
 The server stores only a hash of the code. Revoking a profile's access pauses its tasks, deletes its
@@ -149,6 +154,7 @@ All settings are optional.
 | `PROFILE_MAX_IDLE_MINUTES` | `480` | Longest session idle timeout a user may choose for their profile (sessions still end at `SESSION_MAX_HOURS`) |
 | `MAX_PROFILES` | `1000` | Profiles this instance holds at most |
 | `TASKS_ENABLED` | `true` | `false` switches scheduled tasks off |
+| `ADMIN_PROFILES` | unset | Comma-separated profile IDs that may manage task invites from the Profile menu |
 | `TASKS_ACCESS` | `open` | `invite` = tasks only for profiles that redeemed an invite code (see [Invite-only tasks](#invite-only-tasks-tasks_accessinvite)) |
 | `TASK_CONCURRENCY` | `2` | Task runs at once |
 | `TASK_TIMEOUT_MINUTES` | `10` | Longest a run may take |

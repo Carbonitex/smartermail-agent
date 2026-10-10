@@ -75,6 +75,15 @@ public sealed record ServerOptions
     /// <summary>Whether <paramref name="profile"/> may use scheduled tasks here (always, unless invite-only).</summary>
     public bool AllowsTasks(ProfileRow profile) => !TaskInviteOnly || profile.TaskAccessAt is not null;
 
+    /// <summary>
+    /// <c>ADMIN_PROFILES</c>: profile ids (comma-separated) whose unlocked browser session may manage
+    /// task invites from the Profile menu (<c>/api/admin/*</c>). Empty = no web admin; the CLI
+    /// (<c>Server/AdminCli.cs</c>) always works.
+    /// </summary>
+    public IReadOnlySet<string> AdminProfiles { get; init; } = new HashSet<string>();
+
+    public bool IsAdmin(string profileId) => AdminProfiles.Contains(profileId);
+
     public int TaskConcurrency { get; init; } = 2;
     public TimeSpan TaskTimeout { get; init; } = TimeSpan.FromMinutes(10);
     public int TaskMaxToolRounds { get; init; } = 15;
@@ -165,6 +174,9 @@ public sealed record ServerOptions
             ProfileMaxIdleMinutes = Math.Max(ProfileMinIdleMinutes, Int(config, "PROFILE_MAX_IDLE_MINUTES", 480)),
             TasksEnabledSetting = Bool(config, "TASKS_ENABLED", true),
             TaskInviteOnly = inviteOnly,
+            AdminProfiles = (config["ADMIN_PROFILES"] ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.Ordinal),
             TaskConcurrency = Int(config, "TASK_CONCURRENCY", 2),
             TaskTimeout = TimeSpan.FromMinutes(Int(config, "TASK_TIMEOUT_MINUTES", 10)),
             TaskMaxToolRounds = Int(config, "TASK_MAX_TOOL_ROUNDS", 15),

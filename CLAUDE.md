@@ -241,6 +241,7 @@ Controllers/
   ProfileController.cs        /api/profile/* (server mode)
   TasksController.cs          /api/tasks/* (server mode with DATA_KEY)
   TaskAccess.cs               the 403 TASKS_NOT_INVITED every task endpoint gives a profile without access
+  AdminController.cs          /api/admin/* (task invites from the browser, ADMIN_PROFILES only)
 Mcp/
   ToolPolicy.cs               THE policy: registered tool classes → scope + category, role→scope,
                               write classification, eligibility, `account` injection + resolution
@@ -263,6 +264,7 @@ wwwroot/                      the browser UI (owned by the frontend; wwwroot/dev
   js/profile.js               profile flows (create, passkey / recovery sign-in, unlock, settings sync)
   js/profile-ui.js            passkey panel, "save to a profile" offer, Profile menu, recovery-code dialog
   js/tasks.js                 the Tasks dialog: list, editor (cron presets), runs, transcript viewer
+  js/admin-ui.js              the Profile menu's "Invites (admin)" section (ADMIN_PROFILES)
 ```
 
 Outside `src/Agent/`:
@@ -836,7 +838,18 @@ redeemed a code or that the operator granted. `ServerOptions.AllowsTasks(Profile
   [--note T] | list | revoke <id> [--profiles]`, `access list | grant <profileId> | revoke <profileId>`.
   `Program.cs` hands those argument lists to it before building the web host; it reads the same
   environment and opens the same SQLite file (WAL). stdout of `invites create` is the code alone. No
-  HTTP admin endpoint, on purpose.
+  HTTP admin endpoint unless `ADMIN_PROFILES` is set (below).
+- **Web admin** (`Controllers/AdminController.cs`, `js/admin-ui.js`): `ADMIN_PROFILES` = comma-separated
+  profile ids (default empty = off). Such a profile's **unlocked**, **cookie** session gets
+  `ProfileView.admin = true` and the Profile menu's "Invites (admin)" section; everyone else (another
+  profile, a locked or plain session; an MCP token is already `401` on `/api/*`) gets a bare `404`.
+  `GET /api/admin/invites` → `{ inviteOnly, invites: [{ id, note, uses, maxUses, state, createdAt,
+  expiresAt }], access: [{ profileId, grantedAt, inviteId, inviteNote, lastSeenAt, you }] }`;
+  `POST /api/admin/invites { note?, uses? (1), days? }` → `{ code, invite }` (the only time the code is
+  returned; `400 INVITE_OPTIONS_INVALID`); `DELETE /api/admin/invites/{id}[?profiles=true]` →
+  `{ profilesRevoked }`; `POST|DELETE /api/admin/access/{profileId}` → `204` (grant / revoke). `api`
+  limiter. Logged: action + invite / profile id, never a code. The Settings section shows every
+  profile its own id (with Copy), which is what the operator sees.
 - **Revoking access** (`RevokeAccess`, database only, since the CLI is another process): access and the
   task key cleared, every task disabled with status `TASKS_NOT_INVITED`, pending proposals denied
   (payload erased). Delegated rows stay `DATA_KEY`-sealed until the owner's next unlock, where
@@ -1279,6 +1292,7 @@ SmarterMail error bodies. Set `CORE_CONSOLE_LOG=true` to see them while debuggin
 | `TASK_ANALYSIS_MODEL` | `ANALYSIS_MODEL` | analysis model for scheduled runs; `off`/`none` = results clamped as before |
 | `APPROVAL_MAX_PENDING` | `100` | pending approval proposals per profile |
 | `TASK_MAX_PROPOSALS` | `50` | highest per-run proposal limit a task may set |
+| `ADMIN_PROFILES` | unset | profile ids whose unlocked browser session may manage task invites (Profile menu → Invites); unset = CLI only |
 | `TASKS_ACCESS` | `open` | `invite` = scheduled tasks only for profiles that redeemed an invite code or were granted access (see [Invite-only tasks](#invite-only-tasks)) |
 | `TRIGGERS_ENABLED` (true), `TRIGGER_MIN_INTERVAL_MINUTES` (5), `TRIGGERS_PER_PROFILE` (5), `TRIGGER_MAX_RUNS_PER_DAY` (24), `TRIGGER_CONCURRENCY` (4), `PROBES_PER_HOST_PER_MINUTE` (30), `PROBES_PER_PROFILE_PER_MINUTE` (6, interactive probes) | | condition-triggered tasks |
 | `PATH_BASE` | `/` | path prefix, e.g. `/mail-agent` when a reverse proxy serves it under one |

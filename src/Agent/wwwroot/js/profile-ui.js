@@ -7,6 +7,7 @@
 
 import * as api from './api.js';
 import * as profile from './profile.js';
+import { adminSection } from './admin-ui.js';
 import { prfSupported, passkeyErrorMessage, NoPrfError } from './passkey.js';
 
 const $ = (id) => document.getElementById(id);
@@ -323,6 +324,15 @@ function renderPopover() {
   }));
   idleRow.append(idleText, idle);
   add(para('Applies to every browser signed in to this profile. A new tab or a restarted browser also opens it without the passkey until then.'));
+  const idRow = add(document.createElement('div'));
+  idRow.className = 'profile-row';
+  const idText = document.createElement('span');
+  idText.textContent = `Profile ID: ${view.id}`;
+  idText.title = 'What the person running this server sees for your profile; nothing else about you is readable there.';
+  idRow.append(idText, button('Copy', (b) => busy(b, async () => {
+    await navigator.clipboard.writeText(view.id);
+    b.textContent = 'Copied';
+  })));
 
   const allowLabel = add(document.createElement('label'));
   allowLabel.className = 'tools-option';
@@ -413,6 +423,12 @@ function renderPopover() {
       view = await api.setTasksPaused(!view.tasksPaused);
       renderPopover();
     })));
+  }
+
+  // Invites, for this server's admins (ADMIN_PROFILES). Needs the unlocked profile, like the server.
+  if (view.admin && view.unlocked) {
+    add(section('Invites (admin)'));
+    add(adminSection({ notice: (text, kind) => hooks.notice(text, kind), busy }));
   }
 
   // Leaving

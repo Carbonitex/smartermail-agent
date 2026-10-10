@@ -64,3 +64,40 @@ test('stub: an open server never asks for a code', async () => {
     await stub.stop();
   }
 });
+
+test('stub: an admin makes a code that another profile redeems', async () => {
+  const stub = await startStub({ TASKS_ACCESS: 'invite', ADMIN: '1' });
+  try {
+    const owner = await profileSession(stub);
+    assert.equal((await call(stub.base, 'GET', '/api/profile', undefined, owner.cookie)).body.admin, true);
+
+    const made = await post(stub.base, '/api/admin/invites', { note: 'for Sam', uses: 1 }, owner.cookie);
+    assert.equal(made.status, 200);
+    assert.match(made.body.code, /^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
+
+    const guest = await profileSession(stub);
+    assert.equal((await post(stub.base, '/api/profile/task-access', { code: made.body.code.toLowerCase() }, guest.cookie)).status, 200);
+
+    const list = (await call(stub.base, 'GET', '/api/admin/invites', undefined, owner.cookie)).body;
+    assert.equal(list.invites[0].state, 'used up');
+    assert.equal(list.access.length, 1);
+    assert.equal(list.access[0].inviteNote, 'for Sam');
+    assert.ok(!JSON.stringify(list).includes(made.body.code));
+
+    assert.equal((await call(stub.base, 'DELETE', `/api/admin/access/${list.access[0].profileId}`, undefined, owner.cookie)).status, 204);
+    assert.equal((await call(stub.base, 'GET', '/api/profile', undefined, guest.cookie)).body.taskAccess.granted, false);
+  } finally {
+    await stub.stop();
+  }
+});
+
+test('stub: without ADMIN the admin endpoints do not exist', async () => {
+  const stub = await startStub({ TASKS_ACCESS: 'invite' });
+  try {
+    const { cookie } = await profileSession(stub);
+    assert.equal((await call(stub.base, 'GET', '/api/profile', undefined, cookie)).body.admin, false);
+    assert.equal((await call(stub.base, 'GET', '/api/admin/invites', undefined, cookie)).status, 404);
+  } finally {
+    await stub.stop();
+  }
+});

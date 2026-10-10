@@ -135,15 +135,14 @@ public static class AdminCli
             var value = i + 1 < rest.Length ? rest[i + 1] : null;
             switch (rest[i])
             {
-                case "--uses" when int.TryParse(value, out var u) && u is > 0 and <= 10_000:
+                case "--uses" when int.TryParse(value, out var u) && u is > 0 and <= TaskInviteStore.MaxUses:
                     uses = u;
                     break;
-                case "--days" when int.TryParse(value, out var d) && d is > 0 and <= 3650:
+                case "--days" when int.TryParse(value, out var d) && d is > 0 and <= TaskInviteStore.MaxDays:
                     days = d;
                     break;
                 case "--note" when !string.IsNullOrWhiteSpace(value):
-                    var cleaned = new string(value.Trim().Where(c => !char.IsControl(c)).ToArray());
-                    note = cleaned.Length > 80 ? cleaned[..80] : cleaned;
+                    note = TaskInviteStore.CleanNote(value);
                     break;
                 default:
                     problem = $"Unexpected '{rest[i]}'. --uses 1-10000, --days 1-3650, --note TEXT.";

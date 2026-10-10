@@ -25,6 +25,17 @@ public sealed class TaskInviteStore(DataStore db)
     /// <summary>What a revoked profile's tasks are paused with (also a hard run failure).</summary>
     public const string NotInvitedCode = "TASKS_NOT_INVITED";
 
+    public const int MaxUses = 10_000;
+    public const int MaxDays = 3650;
+    public const int MaxNote = 80;
+
+    /// <summary>An operator's note: trimmed, no control characters, at most <see cref="MaxNote"/>; null when empty.</summary>
+    public static string? CleanNote(string? note)
+    {
+        var cleaned = new string((note ?? "").Trim().Where(c => !char.IsControl(c)).ToArray());
+        return cleaned.Length == 0 ? null : cleaned.Length > MaxNote ? cleaned[..MaxNote] : cleaned;
+    }
+
     private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     private const int CodeChars = 16;
 
