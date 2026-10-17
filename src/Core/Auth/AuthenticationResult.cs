@@ -19,6 +19,19 @@ public enum AuthResultKind
     Transient,
 }
 
+/// <summary>How SmarterMail answered a <c>/api/v1/auth/refresh-token</c> call.</summary>
+public enum RefreshAnswerKind
+{
+    /// <summary>A usable access token came back.</summary>
+    Refreshed,
+
+    /// <summary>SmarterMail refused the refresh token (expired, revoked, rotated, or a bad signature).</summary>
+    Rejected,
+
+    /// <summary>No usable answer (5xx, 408/429, non-JSON, no access token): the token may still be good.</summary>
+    Unavailable,
+}
+
 /// <param name="Message">Safe to log: never contains the password or the raw response body.</param>
 /// <param name="Code">SmarterMail's message code (first pipe segment only) or <c>HTTP_&lt;status&gt;</c>.</param>
 public sealed record AuthenticationResult(
@@ -82,6 +95,49 @@ public static class AuthResponseClassifier
         // 2xx without a usable token, 400/404 with an unknown code, etc.: ambiguous, so retry.
         return (AuthResultKind.Transient, code.Length > 0 ? code : httpCode);
     }
+
+    /// <summary>
+    /// Classifies SmarterMail's <c>/api/v1/auth/refresh-token</c> answer. A refresh token SmarterMail
+    /// cannot verify (one signed with a key the server no longer has, say) is refused with <b>200</b>,
+    /// <c>success: false</c> and empty tokens, so the status alone does not tell; an unknown token is a
+    /// 401 with the same body. Only an explicit <c>success: false</c> counts: the flag is optional.
+    /// </summary>
+    /// <param name="body">The parsed body, or <c>default</c> when it was empty or not JSON.</param>
+    public static RefreshAnswerKind ClassifyRefresh(int status, JsonElement body)
+    {
+        if (status >= 500 || status is 408 or 429)
+            return RefreshAnswerKind.Unavailable;
+        if (status >= 400)
+            return RefreshAnswerKind.Rejected;
+        if (body.ValueKind != JsonValueKind.Object)
+            return RefreshAnswerKind.Unavailable;
+        if (Bool(body, "success") == false)
+            return body.TryGetProperty("resultCode", out var rc) && rc.TryGetInt32(out var code) && code >= 500
+                ? RefreshAnswerKind.Unavailable
+                : RefreshAnswerKind.Rejected;
+        return string.IsNullOrEmpty(Str(body, "accessToken")) ? RefreshAnswerKind.Unavailable : RefreshAnswerKind.Refreshed;
+    }
+
+    /// <summary>The response body as JSON, or <c>default</c> when it is empty or not JSON.</summary>
+    public static async Task<JsonElement> ReadBodyAsync(HttpContent content, CancellationToken cancellationToken = default)
+    {
+        var body = await content.ReadAsStringAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(body))
+            return default;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+    }
+
+    /// <summary>A string property, or null when it is missing, not a string, or empty.</summary>
+    public static string? NonEmptyStr(JsonElement e, string name) =>
+        Str(e, name) is { Length: > 0 } value ? value : null;
 
     private static bool IsRejectionCode(string code) =>
         RejectionCodes.Contains(code, StringComparer.OrdinalIgnoreCase)

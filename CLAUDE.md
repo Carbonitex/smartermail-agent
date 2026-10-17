@@ -629,8 +629,8 @@ holds. Hence:
   (2 min) of the access token's expiry (tokens live 15 min), re-checked under the refresh lock so
   concurrent calls rotate once; otherwise just re-stamp Core's refresh clock
   (`UserContextFactory.StampRefreshClock`) so Core's file path never runs. No expiry to go by →
-  the 8-minute clock. The 401 retry still applies. A refresh SmarterMail **refuses** (4xx) drops
-  the account, as the sweeper would, and the call gets a model-readable `isError`; an unreachable
+  the 8-minute clock. The 401 retry still applies. A refresh SmarterMail **refuses** (4xx, or 200 with `success: false`)
+  drops the account, as the sweeper would, and the call gets a model-readable `isError`; an unreachable
   server (`RefreshResult.Unavailable`) is not fatal and the call goes ahead on the token it has.
   An idle remembered session rotates nothing, so the browser's copy stays valid while it is away.
 - **Resume version.** `Session.ResumeVersion` is a Unix-ms clock forced strictly upward, bumped by
@@ -1469,7 +1469,11 @@ reaches stdout.
   remember-me (when `RESUME_KEY` is set). Passkeys need HTTPS or `localhost`, never a bare IP.
 - Checked against a live server (October 2026): `refresh-token` **slides** `refreshTokenExpiration`
   (60 days from each refresh), rotates the refresh token, and refuses a replayed one, so the daily
-  keep-alive keeps delegated accounts alive indefinitely. Not yet checked: the passkey flows in real
+  keep-alive keeps delegated accounts alive indefinitely. A refresh token it cannot verify (signed
+  with a key it no longer has; seen after a SmarterMail container was recreated without persisting
+  `/root/.aspnet/DataProtection-Keys`, which signed out every API client) gets **200** with
+  `success: false`, `resultCode: 200` and empty tokens; an unknown one gets 401. Every refresh path
+  classifies through `AuthResponseClassifier.ClassifyRefresh` (src/Core). Not yet checked: the passkey flows in real
   browsers with synced passkeys (the server side is tested with a software authenticator, the
   browser crypto against a C#-sealed vector, the UI against the stub with a recovery code).
 - `wwwroot/dev/` (the frontend's stub server) is excluded from the published image by both the root

@@ -73,6 +73,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A refresh token SmarterMail refuses with HTTP 200 and `success: false` (it does this for a token
+  it cannot verify, for example after its signing key changed) was read as a successful refresh: the
+  agent kept the account with empty tokens and only reported it as signed out a day later. It is now
+  rejected at once, and the stored tokens are left as they were. The two MCP servers had the same
+  gap; they now fall back to signing in again straight away.
+
 - Agent: old tool results from write tools and failed calls are never elided from the chat history,
   so the model is not nudged into repeating a change; an elided result of unknown kind says a change
   it made was already made.

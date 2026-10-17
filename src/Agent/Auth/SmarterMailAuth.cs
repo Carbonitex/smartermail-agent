@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using SmarterMailMcp.Core.Auth;
 using SmarterMailMcp.Core.Models;
 
 namespace SmarterMailAgent.Auth;
@@ -47,7 +48,7 @@ public enum RefreshResult
     /// <summary>New access and refresh tokens are in the TokenData; the old refresh token is dead.</summary>
     Refreshed,
 
-    /// <summary>SmarterMail refused the refresh token (4xx), or there was none: sign in again.</summary>
+    /// <summary>SmarterMail refused the refresh token (4xx, or 200 with success:false), or there was none: sign in again.</summary>
     Rejected,
 
     /// <summary>No usable answer (connection failure, timeout, 5xx): the token may still be good.</summary>
@@ -436,22 +437,23 @@ public sealed class SmarterMailAuth(ILogger<SmarterMailAuth> logger)
         {
             using var response = await _http.PostAsJsonAsync(
                 url, new { token = tokenData.RefreshToken, clientId = tokenData.ClientId }, ct);
+            var data = await AuthResponseClassifier.ReadBodyAsync(response.Content, ct);
 
-            // A 4xx is SmarterMail refusing the token (expired, revoked, or already rotated); a 5xx
-            // or a proxy page is the server having a bad moment, and the token may still be good.
-            if (!response.IsSuccessStatusCode)
-                return (int)response.StatusCode is >= 400 and < 500 ? RefreshResult.Rejected : RefreshResult.Unavailable;
+            // A 4xx, or a 200 with success:false (a token signed with a key the server no longer has),
+            // is SmarterMail refusing the token; a 5xx or a proxy page is the server having a bad
+            // moment, and the token may still be good.
+            switch (AuthResponseClassifier.ClassifyRefresh((int)response.StatusCode, data))
+            {
+                case RefreshAnswerKind.Rejected:
+                    return RefreshResult.Rejected;
+                case RefreshAnswerKind.Unavailable:
+                    return RefreshResult.Unavailable;
+            }
 
-            var data = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-            if (data.ValueKind != JsonValueKind.Object ||
-                !data.TryGetProperty("accessToken", out var accessToken) ||
-                accessToken.ValueKind != JsonValueKind.String)
-                return RefreshResult.Unavailable;
-
-            tokenData.AccessToken = accessToken.GetString();
-            tokenData.RefreshToken = Str(data, "refreshToken") ?? tokenData.RefreshToken;
-            tokenData.Expiration = Str(data, "accessTokenExpiration") ?? tokenData.Expiration;
-            tokenData.RefreshExpiration = Str(data, "refreshTokenExpiration") ?? tokenData.RefreshExpiration;
+            tokenData.AccessToken = AuthResponseClassifier.NonEmptyStr(data, "accessToken");
+            tokenData.RefreshToken = AuthResponseClassifier.NonEmptyStr(data, "refreshToken") ?? tokenData.RefreshToken;
+            tokenData.Expiration = AuthResponseClassifier.NonEmptyStr(data, "accessTokenExpiration") ?? tokenData.Expiration;
+            tokenData.RefreshExpiration = AuthResponseClassifier.NonEmptyStr(data, "refreshTokenExpiration") ?? tokenData.RefreshExpiration;
             return RefreshResult.Refreshed;
         }
         catch (Exception) when (!ct.IsCancellationRequested)

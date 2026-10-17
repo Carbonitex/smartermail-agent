@@ -140,35 +140,21 @@ public class UserContext : IDisposable, IAsyncDisposable
             };
             using var response = await _httpClient.SendAsync(request);
 
-            if (response.IsSuccessStatusCode)
+            // A 200 with success:false is a refusal too (see AuthResponseClassifier.ClassifyRefresh).
+            var result = await AuthResponseClassifier.ReadBodyAsync(response.Content);
+            if (AuthResponseClassifier.ClassifyRefresh((int)response.StatusCode, result) == RefreshAnswerKind.Refreshed)
             {
-                var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+                _accessToken = AuthResponseClassifier.NonEmptyStr(result, "accessToken")!;
+                tokenData.AccessToken = _accessToken;
+                tokenData.RefreshToken = AuthResponseClassifier.NonEmptyStr(result, "refreshToken") ?? tokenData.RefreshToken;
+                tokenData.Expiration = AuthResponseClassifier.NonEmptyStr(result, "accessTokenExpiration") ?? tokenData.Expiration;
+                tokenData.RefreshExpiration = AuthResponseClassifier.NonEmptyStr(result, "refreshTokenExpiration") ?? tokenData.RefreshExpiration;
 
-                if (result.TryGetProperty("accessToken", out var newAccessToken))
-                {
-                    _accessToken = newAccessToken.GetString() ?? string.Empty;
+                _globalContext.WriteTokenFile(tokenData);
 
-                    tokenData.AccessToken = _accessToken;
-
-                    if (result.TryGetProperty("refreshToken", out var newRefreshToken))
-                    {
-                        tokenData.RefreshToken = newRefreshToken.GetString();
-                    }
-                    if (result.TryGetProperty("accessTokenExpiration", out var newExpiration))
-                    {
-                        tokenData.Expiration = newExpiration.GetString();
-                    }
-                    if (result.TryGetProperty("refreshTokenExpiration", out var newRefreshExpiration))
-                    {
-                        tokenData.RefreshExpiration = newRefreshExpiration.GetString();
-                    }
-
-                    _globalContext.WriteTokenFile(tokenData);
-
-                    _lastTokenRefresh = DateTime.Now;
-                    Logging.Log("[DB] Token refreshed successfully.");
-                    return true;
-                }
+                _lastTokenRefresh = DateTime.Now;
+                Logging.Log("[DB] Token refreshed successfully.");
+                return true;
             }
 
             Console.Error.WriteLine("[DB] Token refresh failed, attempting re-authentication fallback.");

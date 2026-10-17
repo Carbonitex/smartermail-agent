@@ -59,6 +59,30 @@ public sealed class StartupSignInTests : IDisposable
         Assert.Equal(expected, AuthResponseClassifier.Classify(status, parsed).Kind);
     }
 
+    [Theory]
+    // Refused: what SmarterMail 9784 answers for a token signed with a key it no longer has, and an unknown token.
+    [InlineData(200, """{"accessToken":"","refreshToken":"","success":false,"resultCode":200,"message":"IDX10517: Signature validation failed."}""", RefreshAnswerKind.Rejected)]
+    [InlineData(401, """{"accessToken":"","refreshToken":"","success":false,"resultCode":401,"message":"Token not found in settings"}""", RefreshAnswerKind.Rejected)]
+    [InlineData(400, "", RefreshAnswerKind.Rejected)]
+    [InlineData(401, "<html>Unauthorized</html>", RefreshAnswerKind.Rejected)]
+    // No usable answer: the token may still be good.
+    [InlineData(503, "", RefreshAnswerKind.Unavailable)]
+    [InlineData(429, "", RefreshAnswerKind.Unavailable)]
+    [InlineData(200, "<html>Bad Gateway</html>", RefreshAnswerKind.Unavailable)]
+    [InlineData(200, """{"success":false,"resultCode":500}""", RefreshAnswerKind.Unavailable)]
+    [InlineData(200, """{"success":true,"accessToken":""}""", RefreshAnswerKind.Unavailable)]
+    [InlineData(200, "", RefreshAnswerKind.Unavailable)]
+    // Refreshed; the success flag is optional.
+    [InlineData(200, """{"success":true,"accessToken":"t","refreshToken":"r"}""", RefreshAnswerKind.Refreshed)]
+    [InlineData(200, """{"accessToken":"t","refreshToken":"r"}""", RefreshAnswerKind.Refreshed)]
+    public void Classifies_refresh_token_answers(int status, string body, RefreshAnswerKind expected)
+    {
+        JsonElement parsed = default;
+        try { parsed = JsonDocument.Parse(body).RootElement.Clone(); } catch (JsonException) { }
+
+        Assert.Equal(expected, AuthResponseClassifier.ClassifyRefresh(status, parsed));
+    }
+
     [Fact]
     public async Task Credential_rejection_is_not_retried_and_signals_exit_code_2()
     {

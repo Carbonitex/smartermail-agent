@@ -280,50 +280,32 @@ public class AuthenticationService
                 clientId = tokenData.ClientId
             };
 
-            var response = await _httpClient.PostAsJsonAsync(apiUrl, payload);
-            response.EnsureSuccessStatusCode();
+            using var response = await _httpClient.PostAsJsonAsync(apiUrl, payload);
+            var data = await AuthResponseClassifier.ReadBodyAsync(response.Content);
 
-            var data = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-            if (data.TryGetProperty("accessToken", out var accessTokenElement))
+            // A 200 with success:false is a refusal too (see AuthResponseClassifier.ClassifyRefresh).
+            var answer = AuthResponseClassifier.ClassifyRefresh((int)response.StatusCode, data);
+            if (answer != RefreshAnswerKind.Refreshed)
             {
-                Logging.Log("Received new access token from server");
-
-                // Update token data with new tokens
-                tokenData.AccessToken = accessTokenElement.GetString();
-
-                if (data.TryGetProperty("refreshToken", out var refreshTokenElement))
-                {
-                    tokenData.RefreshToken = refreshTokenElement.GetString();
-                }
-
-                if (data.TryGetProperty("accessTokenExpiration", out var expirationElement))
-                {
-                    tokenData.Expiration = expirationElement.GetString();
-                }
-
-                if (data.TryGetProperty("refreshTokenExpiration", out var refreshExpirationElement))
-                {
-                    tokenData.RefreshExpiration = refreshExpirationElement.GetString();
-                }
-
-                // Save updated tokens
-                if (_globalContext.WriteTokenFile(tokenData))
-                {
-                    Logging.Log("Token refreshed successfully.");
-                    return true;
-                }
-                else
-                {
-                    Console.Error.WriteLine("Failed to write refreshed token to file.");
-                    return false;
-                }
-            }
-            else
-            {
-                Console.Error.WriteLine("Token refresh failed: No access token in response.");
+                Console.Error.WriteLine($"Token refresh failed: {answer} (HTTP {(int)response.StatusCode}).");
                 return false;
             }
+
+            Logging.Log("Received new access token from server");
+            tokenData.AccessToken = AuthResponseClassifier.NonEmptyStr(data, "accessToken");
+            tokenData.RefreshToken = AuthResponseClassifier.NonEmptyStr(data, "refreshToken") ?? tokenData.RefreshToken;
+            tokenData.Expiration = AuthResponseClassifier.NonEmptyStr(data, "accessTokenExpiration") ?? tokenData.Expiration;
+            tokenData.RefreshExpiration = AuthResponseClassifier.NonEmptyStr(data, "refreshTokenExpiration") ?? tokenData.RefreshExpiration;
+
+            // Save updated tokens
+            if (_globalContext.WriteTokenFile(tokenData))
+            {
+                Logging.Log("Token refreshed successfully.");
+                return true;
+            }
+
+            Console.Error.WriteLine("Failed to write refreshed token to file.");
+            return false;
         }
         catch (HttpRequestException ex)
         {
