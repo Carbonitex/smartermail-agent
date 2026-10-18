@@ -15,6 +15,7 @@ import { renderMarkdown, prettyJson } from './markdown.js';
 import { categoryOf } from './llm.js';
 import { renderApprovals, modeSelect, approvalFields } from './approvals.js';
 import { buildTriggerEditor, describeTrigger } from './triggers.js';
+import { isLocalModel } from './local-model-ui.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -327,6 +328,12 @@ function renderEditor(task) {
     let when = null;
     if (preset.value === 'condition') {
       try { when = trigger.value(); } catch (err) { error.textContent = err.message; error.hidden = false; return; }
+    }
+    if (isLocalModel(model.value.trim())) {
+      // EXPERIMENTAL local model: it runs in a browser tab, and a task runs on the server.
+      error.textContent = 'The in-browser model cannot run scheduled tasks: they run on the server. Choose an OpenRouter model.';
+      error.hidden = false;
+      return;
     }
     const chosenIds = accounts.filter((a, i) => accountBoxes[i].input.checked).map((a) => a.id);
     if (when && !chosenIds.includes(when.probe.accountId)) chosenIds.push(when.probe.accountId);   // the checked account is one of the task's

@@ -25,6 +25,8 @@ import {
 } from './llm.js';
 import { ArtifactStore, ANALYZE_RESULT_TOOL, ARTIFACT_THRESHOLD, DEFAULT_ANALYSIS_MODEL, formatSize } from './artifacts.js';
 import { runAnalyzeResult } from './subagent.js';
+// EXPERIMENTAL in-browser model: every use in this file is marked "local model".
+import * as localModel from './local-model-ui.js';
 
 /** analyze_result as sent to OpenRouter: one object, so every request serialises it identically. */
 const ANALYZE_RESULT_FUNCTION = toolsToOpenAI([ANALYZE_RESULT_TOOL])[0];
@@ -72,6 +74,7 @@ const el = {
   loginLegend: $('login-legend'),
   loginFooter: $('login-footer'),
   fsOpenRouter: $('fs-openrouter'),
+  localModel: $('f-local-model'),
   loginCancel: $('login-cancel'),
   hostname: $('f-hostname'),
   email: $('f-email'),
@@ -122,6 +125,7 @@ const el = {
   mcpCopy: $('mcp-copy'),
   mcpRevoke: $('mcp-revoke'),
   modelSelect: $('model-select'),
+  localModelBar: $('local-model-bar'),
   analysisOn: $('f-analysis'),
   analysisModel: $('f-analysis-model'),
   analysisModels: $('analysis-models'),
@@ -175,7 +179,9 @@ async function init() {
   el.email.value = storage.email;
   el.allowChanges.checked = storage.allowChanges;
   el.key.value = storage.openRouterKey;
+  el.localModel.checked = localModel.isLocalModel(storage.model);
   state.disabled = storage.disabledCategories;
+  initLocalModel();
 
   applyAnalysisConfig(await profile.loadConfig());
   await initProfileUi(profileHooks);
@@ -218,7 +224,7 @@ async function enterSession(s, keyMessage) {
   // locked one is not usable until its passkey has been used again.
   if (s && s.profile && !s.profile.unlocked) return false;
   if (!first && !(s && s.profile)) return false;
-  if (storage.openRouterKey) {
+  if (canChat(storage.model)) {
     await enterChat(s);
     return true;
   }
@@ -343,7 +349,8 @@ const profileHooks = {
 const taskHooks = {
   getSession: () => state.session,
   getToolList: () => state.toolList,
-  currentModel: () => el.modelSelect.value || storage.model || DEFAULT_MODEL,
+  // local model: it only exists in this browser, so a task starts from the default instead.
+  currentModel: () => localModel.taskModelFor(el.modelSelect.value || storage.model, DEFAULT_MODEL),
   notice: (text, kind) => addNotice(text, kind),
   unlock: async () => profileHooks.onSignedIn(await profile.signInWithPasskey())
 };
@@ -464,14 +471,15 @@ function wireLogin() {
     const password = el.password.value;
     const key = el.key.value.trim();
     const readOnly = !el.allowChanges.checked;
+    const local = el.localModel.checked;   // local model: no key needed
 
     // Signed in already (cookie), only the key missing: resume that session. Typing a
     // password instead means a fresh login, handled below.
-    if (state.resumable && !state.addMode && !password) return resumeWithKey(key);
+    if (state.resumable && !state.addMode && !password) return resumeWithKey(key, local);
 
     if (!hostname || !email || !password) return setLoginError('Server, email and password are all required.');
     if (state.addMode) return submitAddAccount({ hostname, email, password, readOnly });
-    if (!key) return setLoginError('An OpenRouter API key is required — the chat runs in your browser against your own key.');
+    if (!key && !local) return setLoginError('An OpenRouter API key is required — the chat runs in your browser against your own key.');
 
     const remember = state.resumeEnabled && el.remember.checked;
     el.loginSubmit.disabled = true;
@@ -496,6 +504,7 @@ function wireLogin() {
       el.password.value = '';
       // Saved before the two-factor detour so the key survives into that step.
       storage.openRouterKey = key;
+      applyLoginModelChoice(local);
       storage.hostname = hostname;
       storage.email = email;
       storage.allowChanges = !readOnly;
@@ -516,14 +525,15 @@ function wireLogin() {
   });
 }
 
-async function resumeWithKey(key) {
-  if (!key) return setLoginError('Paste your OpenRouter API key to continue — the chat runs in your browser against your own key.');
+async function resumeWithKey(key, local = false) {
+  if (!key && !local) return setLoginError('Paste your OpenRouter API key to continue — the chat runs in your browser against your own key.');
   el.loginSubmit.disabled = true;
   el.loginSubmit.textContent = 'Continuing…';
   try {
     const s = await api.session();   // still alive? an expired one bounces to the full login
     if (!sessionAccounts(s).length) return showLogin();
-    storage.openRouterKey = key;
+    if (key) storage.openRouterKey = key;
+    applyLoginModelChoice(local);
     await enterChat(s);
     syncProfileSettings();   // a profile chat keeps the key for the next browser
   } catch (err) {
@@ -670,7 +680,7 @@ function wireTwoFactor() {
       }
       // Same code path as a normal login, including the OpenRouter key check.
       await applyRememberChoice(s);
-      if (!storage.openRouterKey) {
+      if (!canChat(storage.model)) {
         showLogin('Signed in to SmarterMail — paste your OpenRouter key to continue.');
         return;
       }
@@ -777,7 +787,7 @@ function conversationId() {
 /** The system prompt for the current accounts and Tools-menu selection. */
 function systemPrompt() {
   return buildSystemPrompt(state.session,
-    { disabledCategories: presentDisabled(), artifacts: analysisOn(), instructions: storage.instructions });
+    { disabledCategories: presentDisabled(), artifacts: analysisActive(), instructions: storage.instructions });
 }
 
 /** Swap the system prompt in place: the conversation after it is untouched. */
@@ -1344,11 +1354,13 @@ function applyAnalysisConfig(config) {
 }
 
 function analysisOn() { return !storage.analysisOff; }
+/** Large results for the current model: never for the local model (analyze_result would need an OpenRouter key and a second model). */
+function analysisActive() { return analysisOn() && !localModel.isLocalModel(currentModel()); }
 function analysisModel() { return storage.analysisModel || state.analysisDefaults.model; }
 
 /** The tools sent with a turn: the server's (after the Tools menu), plus analyze_result at the end when on. */
 function turnTools() {
-  return analysisOn() && state.tools.length ? [...state.tools, ANALYZE_RESULT_FUNCTION] : state.tools;
+  return analysisActive() && state.tools.length ? [...state.tools, ANALYZE_RESULT_FUNCTION] : state.tools;
 }
 
 function renderAnalysisSettings() {
@@ -1705,7 +1717,7 @@ function renderEmptyState() {
 
 function loadModels() {
   const current = storage.model || DEFAULT_MODEL;
-  setModelOptions([{ id: current, name: current }], current);
+  setModelOptions(localModel.withLocalModel(localModel.isLocalModel(current) ? [] : [{ id: current, name: current }]), current);
   fetchToolModels()
     .then((models) => {
       if (el.analysisModels) {
@@ -1715,8 +1727,8 @@ function loadModels() {
           return o;
         }));
       }
-      if (!models.some((m) => m.id === current)) models.unshift({ id: current, name: current + ' (current)' });
-      setModelOptions(models, current);
+      if (!localModel.isLocalModel(current) && !models.some((m) => m.id === current)) models.unshift({ id: current, name: current + ' (current)' });
+      setModelOptions(localModel.withLocalModel(models), current);
     })
     .catch(() => { /* keep the single fallback option */ });
 }
@@ -1731,11 +1743,17 @@ function setModelOptions(models, selected) {
   }
   el.modelSelect.value = selected;
   if (!el.modelSelect.value && models.length) el.modelSelect.value = models[0].id;
+  localModel.render(el.modelSelect.value);
 }
 
 function wireChat() {
   wireAnalysisSettings();
-  el.modelSelect.addEventListener('change', () => { storage.model = el.modelSelect.value; syncProfileSettings(); });
+  el.modelSelect.addEventListener('change', () => {
+    storage.model = el.modelSelect.value;
+    syncProfileSettings();
+    refreshSystemPrompt();   // local model: no "# Large results" section for it
+    localModel.render(el.modelSelect.value);
+  });
 
   el.btnNewChat.addEventListener('click', () => {
     if (state.busy) stopTurn();
@@ -1966,6 +1984,12 @@ function summarise(args, skipAccount = false) {
 function submitInput() {
   const text = el.input.value.trim();
   if (!text) return;
+  if (!canChat()) {
+    // local model: a chat begun on it has no key; the bar above asks for one.
+    addNotice(`${currentModel()} runs on OpenRouter: paste your key above, or pick the in-browser model.`, 'warn');
+    localModel.focusKeyField();
+    return;
+  }
   el.input.value = '';
   autosize();
 
@@ -1999,47 +2023,59 @@ async function drive() {
   let bubble = null;
   let buffer = '';
   const cards = new Map();
+  const model = currentModel();
+  const local = localModel.isLocalModel(model);
 
   try {
+    // analyze_result never reaches the server: it runs here, on this tab's artifacts.
+    let callTool = (name, args) => api.callTool(name, args);
+    let localTools = { [ANALYZE_RESULT_TOOL.name]: (args, call) => analyzeLocally(args, call, cards, controller.signal) };
+    let streamImpl;
+    let ui = {
+      onUsage(round) { state.usage = addUsage(state.usage, round); },
+      onAssistantStart() { bubble = null; buffer = ''; },
+      onContent(chunk, full) {
+        if (!bubble) bubble = addAssistantBubble();
+        buffer = full;
+        paintAssistant(bubble, buffer, true);
+      },
+      onAssistantEnd(full) {
+        if (bubble) paintAssistant(bubble, full || buffer, false);
+        bubble = null;
+      },
+      onToolStart(call) { cards.set(call.id, addToolCard(call)); },
+      onToolEnd(call, result, artifact) {
+        const ref = cards.get(call.id);
+        if (ref) finishToolCard(ref, result, artifact);
+        cards.delete(call.id);
+      },
+      onNotice(text, kind) { addNotice(text, kind); }
+    };
+    if (local) {
+      // local model: its own stream, invalid calls answered in the browser, thinking + stats per round.
+      ({ streamImpl, callTool, localTools } = await localModel.turnOptions({ callTool, localTools }));
+      ui = localModel.wrapUi(ui);
+    }
     await runTurn({
       messages: state.messages,
       tools: turnTools(),
       apiKey: storage.openRouterKey,
-      model: el.modelSelect.value || storage.model || DEFAULT_MODEL,
+      model,
       signal: controller.signal,
       maxToolRounds: MAX_TOOL_ROUNDS,
       url: completionsUrl(),
       sessionId: conversationId(),
-      callTool: (name, args) => api.callTool(name, args),
+      callTool,
+      streamImpl,
       // A write's result is never elided from history (elideOldToolResults): asked "did that
       // work?", the model must not re-run it. The full list, so a switched-off group still counts.
       isWrite: (name) => {
         const t = state.toolList.find((x) => x && x.name === name);
         return t ? t.write === true : undefined;
       },
-      // analyze_result never reaches the server: it runs here, on this tab's artifacts.
-      localTools: { [ANALYZE_RESULT_TOOL.name]: (args, call) => analyzeLocally(args, call, cards, controller.signal) },
-      artifacts: analysisOn() ? state.artifacts : null,
-      ui: {
-        onUsage(round) { state.usage = addUsage(state.usage, round); },
-        onAssistantStart() { bubble = null; buffer = ''; },
-        onContent(chunk, full) {
-          if (!bubble) bubble = addAssistantBubble();
-          buffer = full;
-          paintAssistant(bubble, buffer, true);
-        },
-        onAssistantEnd(full) {
-          if (bubble) paintAssistant(bubble, full || buffer, false);
-          bubble = null;
-        },
-        onToolStart(call) { cards.set(call.id, addToolCard(call)); },
-        onToolEnd(call, result, artifact) {
-          const ref = cards.get(call.id);
-          if (ref) finishToolCard(ref, result, artifact);
-          cards.delete(call.id);
-        },
-        onNotice(text, kind) { addNotice(text, kind); }
-      }
+      localTools,
+      artifacts: analysisActive() ? state.artifacts : null,
+      ui
     });
   } catch (err) {
     if (err && err.name === 'AbortError') {
@@ -2077,6 +2113,7 @@ function setBusy(busy) {
   el.send.hidden = busy;
   el.stop.hidden = !busy;
   el.btnNewChat.disabled = false;
+  if (localModel.isLocalModel(currentModel())) localModel.render(currentModel());   // local model: Unload waits for the turn
   // Accounts only change between turns, so a turn's tools and prompt hold still.
   if (state.session) renderAccounts();
 }
@@ -2086,6 +2123,47 @@ function stopTurn() {
 }
 
 /* ---------------------------------------------------------------- helpers */
+
+/** The picker's model (the stored one before the picker is filled). */
+function currentModel() {
+  return el.modelSelect.value || storage.model || DEFAULT_MODEL;
+}
+
+/** A key, or the in-browser model (local model), which needs none. Before the chat view is up, pass storage.model. */
+function canChat(model = currentModel()) {
+  return !!storage.openRouterKey || localModel.isLocalModel(model);
+}
+
+/** local model: the login form's "in-browser model" box picks it; unticked, an OpenRouter model again. */
+function applyLoginModelChoice(local) {
+  if (local) storage.model = localModel.LOCAL_MODEL_ID;
+  else if (localModel.isLocalModel(storage.model)) storage.model = DEFAULT_MODEL;
+}
+
+/** local model: the bar under the header and what it needs from the chat. */
+function initLocalModel() {
+  localModel.initLocalModelUi({
+    bar: el.localModelBar,
+    messages: el.messages,
+    scroll: () => scroll(),
+    isBusy: () => state.busy,
+    hasKey: () => !!storage.openRouterKey,
+    saveKey: (key) => {
+      storage.openRouterKey = key;
+      el.key.value = key;
+      syncProfileSettings();   // a profile chat keeps the key, as on the login form
+    },
+    toolCount: () => state.tools.length,
+    categoryOf: (name) => {
+      const t = state.toolList.find((x) => x && x.name === name);
+      return t ? t.category : '';
+    },
+    isWrite: (name) => {
+      const t = state.toolList.find((x) => x && x.name === name);
+      return t ? t.write === true : undefined;
+    }
+  });
+}
 
 /**
  * Dev-only completions endpoint override (`?llmUrl=./dev-completions`), used by
