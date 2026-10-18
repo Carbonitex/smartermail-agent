@@ -1,0 +1,4104 @@
+[
+  {
+    "name": "add_ip_access_rule",
+    "description": "Add an IP address to the access whitelist or blacklist",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "IP address to add",
+          "type": "string"
+        },
+        "isWhitelist": {
+          "description": "True for whitelist, false for blacklist",
+          "type": "boolean"
+        },
+        "description": {
+          "description": "Description/reason for the rule",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "address",
+        "isWhitelist",
+        "description"
+      ]
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "block_senders",
+    "description": "Block email senders to prevent delivery. Accepts email addresses or domains.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "senders": {
+          "description": "Comma-separated email addresses or domains to block (e.g., 'spam@example.com, baddomain.com')",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "senders"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "check_sender_blocked",
+    "description": "Check if a sender email address is blocked",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "description": "The email address to check",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "email"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "check_sender_trusted",
+    "description": "Check if a sender email address is trusted (whitelisted)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "description": "The email address to check",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "email"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "create_contact",
+    "description": "Create a new contact in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "firstName": {
+          "description": "First name of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "lastName": {
+          "description": "Last name of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "email": {
+          "description": "Email address of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "displayAs": {
+          "description": "Display name for the contact",
+          "type": "string",
+          "default": ""
+        },
+        "company": {
+          "description": "Company name",
+          "type": "string",
+          "default": ""
+        },
+        "jobTitle": {
+          "description": "Job title",
+          "type": "string",
+          "default": ""
+        },
+        "phoneNumber": {
+          "description": "Phone number",
+          "type": "string",
+          "default": ""
+        },
+        "homeStreet": {
+          "description": "Home street address",
+          "type": "string",
+          "default": ""
+        },
+        "homeCity": {
+          "description": "Home city",
+          "type": "string",
+          "default": ""
+        },
+        "homeState": {
+          "description": "Home state",
+          "type": "string",
+          "default": ""
+        },
+        "homeZip": {
+          "description": "Home zip code",
+          "type": "string",
+          "default": ""
+        },
+        "homeCountry": {
+          "description": "Home country",
+          "type": "string",
+          "default": ""
+        },
+        "busStreet": {
+          "description": "Business street address",
+          "type": "string",
+          "default": ""
+        },
+        "busCity": {
+          "description": "Business city",
+          "type": "string",
+          "default": ""
+        },
+        "busState": {
+          "description": "Business state",
+          "type": "string",
+          "default": ""
+        },
+        "busZip": {
+          "description": "Business zip code",
+          "type": "string",
+          "default": ""
+        },
+        "busCountry": {
+          "description": "Business country",
+          "type": "string",
+          "default": ""
+        },
+        "webPage": {
+          "description": "Web page URL",
+          "type": "string",
+          "default": ""
+        },
+        "additionalInfo": {
+          "description": "Additional notes about the contact (can be HTML)",
+          "type": "string",
+          "default": ""
+        },
+        "isHtml": {
+          "description": "Whether additional info is HTML formatted",
+          "type": "boolean",
+          "default": false
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_contact_group",
+    "description": "Create a new contact group in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "groupName": {
+          "description": "The name of the contact group",
+          "type": "string"
+        },
+        "memberEmails": {
+          "description": "Comma-separated list of email addresses to include in the group",
+          "type": "string",
+          "default": ""
+        },
+        "description": {
+          "description": "Optional description for the group",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "groupName"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_content_filter",
+    "description": "Create a content filter (inbox rule).\n\nConditions JSON format: [{\"fieldType\": 0, \"filterType\": 2, \"searchArguments\": [\"value\"]}]\n- fieldType: 0=FromAddress, 1=FromDomain, 3=WordsInSubject, 4=WordsInBody, 10=ToAddress, 16=HasAttachments, 17=AttachmentFilename\n- filterType: 0=Equals, 1=DoesntEqual, 2=Contains, 3=DoesntContain\n\nActions JSON format: [{\"actionType\": 4, \"argument\": \"FolderName\"}]\n- actionType: 1=Delete, 4=MoveToFolder (arg=folder), 5=AddHeader (arg=Header:Value), 6=PrefixSubject (arg=prefix), 7=Forward (arg=email), 8=MarkAsRead\n\nExample: Create filter to move newsletters to a folder:\n  title: \"Newsletter Filter\"\n  matchType: \"And\"\n  conditions: [{\"fieldType\": 0, \"filterType\": 2, \"searchArguments\": [\"newsletter@\"]}]\n  actions: [{\"actionType\": 4, \"argument\": \"Newsletters\"}]",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "description": "Filter name/title",
+          "type": "string"
+        },
+        "matchType": {
+          "description": "Match type: 'And' (all conditions must match) or 'Or' (any condition matches)",
+          "type": "string",
+          "default": "And"
+        },
+        "conditions": {
+          "description": "JSON array of filter conditions",
+          "type": "string",
+          "default": "[]"
+        },
+        "actions": {
+          "description": "JSON array of filter actions",
+          "type": "string",
+          "default": "[]"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "title"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_content_filter_simple",
+    "description": "Create a content filter (inbox rule) using simple human-readable descriptions instead of JSON.\n\nCondition examples (separate multiple with semicolons):\n  'from contains newsletter@' - match sender address containing text\n  'from equals user@example.com' - match exact sender address\n  'from domain is example.com' - match sender domain\n  'subject contains invoice' - match subject line\n  'body contains unsubscribe' - match email body\n  'to contains sales@' - match recipient\n  'has attachments' - match emails with attachments\n  'attachment name contains .pdf' - match attachment filename\n  'attachment extension is pdf' - match attachment extension\n\nAction examples (separate multiple with semicolons):\n  'move to Newsletters' - move to folder\n  'delete' - delete the email\n  'mark as read' - mark as read\n  'forward to bob@example.com' - forward to address\n  'prefix subject with [NEWS]' - add prefix to subject\n  'set priority high' - set priority (high/normal/low)\n  'flag' - flag for follow up\n\nSupports negation: 'from does not contain X', 'subject doesn't contain X'",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Filter name/title",
+          "type": "string"
+        },
+        "when": {
+          "description": "Condition(s) in plain English. Separate multiple conditions with semicolons.",
+          "type": "string"
+        },
+        "then": {
+          "description": "Action(s) in plain English. Separate multiple actions with semicolons.",
+          "type": "string"
+        },
+        "matchAll": {
+          "description": "Whether all conditions must match (true) or any condition can match (false). Default: true",
+          "type": "boolean",
+          "default": true
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "name",
+        "when",
+        "then"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_dkim_rollover_key",
+    "description": "Create a DKIM rollover key for key rotation",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "keySize": {
+          "description": "Key size in bits (1024, 2048, or 4096)",
+          "type": "integer"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain",
+        "keySize"
+      ]
+    },
+    "category": "DKIM",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_domain",
+    "description": "Create a new domain on the server",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domainName": {
+          "description": "Domain name (e.g., example.com)",
+          "type": "string"
+        },
+        "path": {
+          "description": "File system path for domain storage",
+          "type": "string"
+        },
+        "hostname": {
+          "description": "Hostname for the domain",
+          "type": "string"
+        },
+        "userLimit": {
+          "description": "Maximum number of users allowed (0 for unlimited)",
+          "type": "integer"
+        },
+        "maxSize": {
+          "description": "Maximum domain storage size in MB (0 for unlimited)",
+          "type": "integer"
+        },
+        "adminUsername": {
+          "description": "Domain admin username (optional)",
+          "type": "string"
+        },
+        "adminPassword": {
+          "description": "Domain admin password (optional)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domainName",
+        "path",
+        "hostname",
+        "userLimit",
+        "maxSize",
+        "adminUsername",
+        "adminPassword"
+      ]
+    },
+    "category": "Domains",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_draft",
+    "description": "Save an email as a draft without sending",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "description": "The email addresses to send to, comma separated",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The subject of the email",
+          "type": "string"
+        },
+        "body": {
+          "description": "The body of the email (HTML supported)",
+          "type": "string"
+        },
+        "cc": {
+          "description": "The email addresses to CC, comma separated",
+          "type": "string",
+          "default": ""
+        },
+        "bcc": {
+          "description": "The email addresses to BCC, comma separated",
+          "type": "string",
+          "default": ""
+        },
+        "replyToUid": {
+          "description": "Optional: UID of email being replied to",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "replyToFolder": {
+          "description": "Optional: Folder of email being replied to",
+          "type": "string",
+          "default": ""
+        },
+        "isReply": {
+          "description": "Set to true if this is a reply",
+          "type": "boolean",
+          "default": false
+        },
+        "isForward": {
+          "description": "Set to true if this is a forward",
+          "type": "boolean",
+          "default": false
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "to",
+        "subject",
+        "body"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_folder",
+    "description": "Create a new folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The name of the new folder",
+          "type": "string"
+        },
+        "type": {
+          "description": "The type of the new folder: 1=email, 2=calendar, 3=contact, 4=note, 5=task",
+          "type": "integer"
+        },
+        "parentFolderId": {
+          "description": "The ID of the parent folder (for mail folders)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "parentFolderId"
+      ]
+    },
+    "category": "Folders",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_note",
+    "description": "Create a new note in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        },
+        "subject": {
+          "description": "Title for the note",
+          "type": "string"
+        },
+        "content": {
+          "description": "The html or plain text content of the note",
+          "type": "string"
+        },
+        "color": {
+          "description": "The color to associate with the note (white, yellow, pink, green, blue)",
+          "type": "string"
+        },
+        "isHtml": {
+          "description": "Whether the content is HTML",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "subject",
+        "content",
+        "color",
+        "isHtml"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "delete_calendar_event",
+    "description": "Delete a calendar event",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the calendar folder to delete the event from",
+          "type": "string"
+        },
+        "eventId": {
+          "description": "The ID of the event to delete",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "eventId"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_contact_group",
+    "description": "Delete a contact group from the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "groupId": {
+          "description": "The ID of the contact group to delete",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "groupId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_contacts",
+    "description": "Delete contacts from the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "contactIds": {
+          "description": "The IDs of the contacts to delete",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "contactIds"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_content_filters",
+    "description": "Delete content filters by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filterIds": {
+          "description": "Comma-separated filter IDs to delete",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "filterIds"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_dkim_rollover_key",
+    "description": "Delete a pending DKIM rollover key",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "category": "DKIM",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_domain",
+    "description": "Delete a domain from the server",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name to delete",
+          "type": "string"
+        },
+        "deleteFiles": {
+          "description": "Whether to delete associated files from disk",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain",
+        "deleteFiles"
+      ]
+    },
+    "category": "Domains",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_ip_access_rule",
+    "description": "Delete an IP access rule",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "IP address of the rule to delete",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "address"
+      ]
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_note",
+    "description": "Delete a note in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "noteId": {
+          "description": "The ID of the note to delete",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "noteId",
+        "folderId"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_spool_message",
+    "description": "Delete a single message from the spool",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fileName": {
+          "description": "Spool message filename",
+          "type": "string"
+        },
+        "spoolName": {
+          "description": "Spool name/type the message is in",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "fileName",
+        "spoolName"
+      ]
+    },
+    "category": "Spool",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_spool_messages",
+    "description": "Delete multiple messages from the spool",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fileNames": {
+          "description": "Comma-separated list of spool message filenames",
+          "type": "string"
+        },
+        "spoolName": {
+          "description": "Spool name/type the messages are in",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "fileNames",
+        "spoolName"
+      ]
+    },
+    "category": "Spool",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_ssl_certificate",
+    "description": "Delete SSL/TLS certificates from the server",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "certFilenames": {
+          "description": "Comma-separated list of certificate filenames to delete",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "certFilenames"
+      ]
+    },
+    "category": "Certificates",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_task",
+    "description": "Delete a task from the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the task source",
+          "type": "string"
+        },
+        "taskId": {
+          "description": "The ID of the task to delete",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "taskId"
+      ]
+    },
+    "category": "Tasks",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_users",
+    "description": "Delete users from a domain. Provide a comma-separated list of usernames or email addresses.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "users": {
+          "description": "Comma-separated list of usernames or email addresses to delete",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain",
+        "users"
+      ]
+    },
+    "category": "Users",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "disable_dkim",
+    "description": "Disable DKIM signing for a domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "category": "DKIM",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "disable_users",
+    "description": "Disable or enable users in a domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "users": {
+          "description": "Comma-separated list of usernames or email addresses",
+          "type": "string"
+        },
+        "disable": {
+          "description": "True to disable users, false to enable them",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain",
+        "users",
+        "disable"
+      ]
+    },
+    "category": "Users",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "download_email_attachment",
+    "description": "Fetch an email attachment (filenames from get_email_attachments). Text attachments come back as text; binary ones as base64 when includeBase64=true (up to 5 MB). On a local server that shares your filesystem, savePath writes the file there instead.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the email is located",
+          "type": "string"
+        },
+        "filename": {
+          "description": "The filename of the attachment to download (from get_email_attachments)",
+          "type": "string"
+        },
+        "savePath": {
+          "description": "Optional: save to this path on the MCP server's filesystem (a directory gets the attachment's filename). Only works on a local server that shares your filesystem.",
+          "type": "string",
+          "default": ""
+        },
+        "includeBase64": {
+          "description": "Return a binary attachment's bytes as base64Content (up to 5 MB). Text attachments are always returned as text.",
+          "type": "boolean",
+          "default": false
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "filename"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "drop_ip_connections",
+    "description": "Drop all connections from a specific IP address",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ip": {
+          "description": "IP address to disconnect",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "ip"
+      ]
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "drop_user_connections",
+    "description": "Drop all connections for a specific user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username or email address",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "enable_dkim",
+    "description": "Enable DKIM signing for a domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "forceActivation": {
+          "description": "Force activation even if DNS verification fails",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain",
+        "forceActivation"
+      ]
+    },
+    "category": "DKIM",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "expand_contact_group",
+    "description": "Expand a contact group to get all member email addresses (including nested groups)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "description": "The ID of the contact group to expand",
+          "type": "string"
+        },
+        "ignoreSubgroups": {
+          "description": "Set to true to ignore nested groups and only return direct members",
+          "type": "boolean",
+          "default": false
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "groupId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "forward_email",
+    "description": "Forward an email message to other recipients",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email to forward",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the original email is located",
+          "type": "string"
+        },
+        "to": {
+          "description": "The email addresses to forward to, comma separated",
+          "type": "string"
+        },
+        "message": {
+          "description": "Optional message to include above the forwarded content",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "to"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "get_acme_certificates",
+    "description": "List all ACME (Let's Encrypt) certificates",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sortBy": {
+          "description": "Sort field (optional)",
+          "type": "string"
+        },
+        "sortDescending": {
+          "description": "Sort descending (true/false)",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "sortBy",
+        "sortDescending"
+      ]
+    },
+    "category": "Certificates",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_blocked_ips",
+    "description": "Get a list of currently blocked IP addresses",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "description": "Search filter (optional)",
+          "type": "string"
+        },
+        "count": {
+          "description": "Number of results to return (default 100)",
+          "type": "integer"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "search",
+        "count"
+      ]
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_calendar_event",
+    "description": "Get a calendar event for a given folder ID and event ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The folder ID to get the calendar event for",
+          "type": "string"
+        },
+        "eventId": {
+          "description": "The event ID to get the calendar event for",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "eventId"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_calendar_events",
+    "description": "Get calendar events for a given folder ID and date range",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The folder ID to get calendar events for",
+          "type": "string"
+        },
+        "startDate": {
+          "description": "Start date in ISO 8601 format",
+          "type": "string"
+        },
+        "endDate": {
+          "description": "End date in ISO 8601 format",
+          "type": "string"
+        },
+        "searchQuery": {
+          "description": "Filter events by searching various fields (optional)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "startDate",
+        "endDate",
+        "searchQuery"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_connections",
+    "description": "Get active server connections with optional filtering",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "description": "Search filter (optional)",
+          "type": "string"
+        },
+        "count": {
+          "description": "Number of results to return (default 100)",
+          "type": "integer"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "search",
+        "count"
+      ]
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_connections_count",
+    "description": "Get the total count of active server connections",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_contact",
+    "description": "Get full details for a specific contact by ID and source ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "contactId": {
+          "description": "The ID of the contact to retrieve",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "contactId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_contact_group",
+    "description": "Get details of a specific contact group including all members",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "groupId": {
+          "description": "The ID of the contact group to retrieve",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "groupId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_contact_groups",
+    "description": "Get all contact groups from a specific folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_contacts",
+    "description": "Get contacts sorted by most recently contacted",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "searchQuery": {
+          "description": "The search query to filter contacts by",
+          "type": "string"
+        },
+        "maxResults": {
+          "description": "The maximum number of results to return",
+          "type": "integer"
+        },
+        "startIndex": {
+          "description": "The index to start from",
+          "type": "integer"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "searchQuery",
+        "maxResults",
+        "startIndex"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_content_filters",
+    "description": "Get all content filters (inbox rules). Returns filter groups with their conditions and actions.\n\nCondition Field Types: 0=FromAddress, 1=FromDomain, 3=WordsInSubject, 4=WordsInBody, 7=WordsInTo, 10=ToAddress, 16=HasAttachments, 17=AttachmentFilename\nComparison Types: 0=Equals, 1=DoesntEqual, 2=Contains, 3=DoesntContain\nAction Types: 1=Delete, 4=MoveToFolder, 5=AddHeader, 6=PrefixSubject, 7=Forward, 8=MarkAsRead\nMatch Types: 0=And (all conditions), 1=Or (any condition)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_dashboard_stats",
+    "description": "Get server dashboard statistics including message counts, storage usage, and active connections",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Server",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_dkim_settings",
+    "description": "Get a domain's DKIM settings: selector, public key (for the DNS record), key size, pending rollover, active state, canonicalization and signed header fields. Nothing else from the domain settings is returned.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "category": "DKIM",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_domain_info",
+    "description": "Get detailed information about a specific domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name (e.g., example.com)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "category": "Domains",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_domain_settings",
+    "description": "Get the settings/configuration for a specific domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "category": "Domains",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_domains",
+    "description": "List all domains on the server",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Domains",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_email_attachments",
+    "description": "List an email's attachments: filename, contentType (from the file name), approximate size (SmarterMail rounds to KB) and the content IDs of images embedded inline in the body. Read a text attachment with read_email_part; download_email_attachment fetches any of them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the email is located",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "folderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_email_message",
+    "description": "Get a specific email message by UID and folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email to retrieve",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder path where the email is located",
+          "type": "string"
+        },
+        "includeBody": {
+          "description": "Whether to include the message body in the response",
+          "type": "boolean"
+        },
+        "includeHeader": {
+          "description": "Whether to include the message headers in the response",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "includeBody",
+        "includeHeader"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_emails",
+    "description": "Get email metadata like subject, from, date, id, read, flagged, etc. from a specific folder with optional search and pagination",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The folderID to get emails from (accepts <username>/<folderPath> as well, ex: jdoe/Inbox or jdoe/<folderid>)",
+          "type": "string"
+        },
+        "skip": {
+          "description": "The number of emails to skip (for pagination).",
+          "type": "integer",
+          "default": 0
+        },
+        "take": {
+          "description": "The maximum number of emails to return.",
+          "type": "integer",
+          "default": 50
+        },
+        "query": {
+          "description": "Optional search query to filter emails. Supports flags in query:\n                - is:(un)read/is:(un)flagged/is:(un)replied/is:attachment - filter by status\n                - Can combine multiple filters with spaces and optional search query (ex: \"is:attachment is:unread searchterm\")",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_global_address_book",
+    "description": "Get contacts from the global address book",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_inactive_users",
+    "description": "Get a list of inactive users across all domains",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cutoffDate": {
+          "description": "Cutoff date - users inactive since this date (YYYY-MM-DD)",
+          "type": "string"
+        },
+        "count": {
+          "description": "Maximum number of results to return",
+          "type": "integer"
+        },
+        "search": {
+          "description": "Search filter (optional)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "cutoffDate",
+        "count",
+        "search"
+      ]
+    },
+    "category": "Users",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_ip_access_rules",
+    "description": "Get IP access rules (whitelist or blacklist)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "isWhitelist": {
+          "description": "True for whitelist, false for blacklist",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "isWhitelist"
+      ]
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_note",
+    "description": "Get a single note's full information by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "noteId": {
+          "description": "The ID of the note to retrieve",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "noteId",
+        "folderId"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_notes",
+    "description": "Get notes from a specific note source",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_rspamd_servers",
+    "description": "Get Rspamd server configuration",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_server_version",
+    "description": "Get the SmarterMail server version",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Server",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_services",
+    "description": "Get the status of all server services (SMTP, IMAP, POP, etc.)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Server",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_smtp_auth_bypass",
+    "description": "Get the SMTP authentication bypass list (addresses allowed to send without authentication)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_smtp_block_rules",
+    "description": "Get SMTP blocking rules",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_spam_assassin_servers",
+    "description": "Get SpamAssassin server configuration",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_spool_message_count",
+    "description": "Get the total count of messages in the spool",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "reload": {
+          "description": "Whether to reload the count from disk",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "reload"
+      ]
+    },
+    "category": "Spool",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_spool_message_counts",
+    "description": "Get detailed spool message counts broken down by type (pending, badmail, quarantine, etc.)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Spool",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_spool_messages",
+    "description": "List spool messages with optional filtering",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Spool type: Pending, Badmail, or Pickup",
+          "type": "string"
+        },
+        "search": {
+          "description": "Search filter (optional)",
+          "type": "string"
+        },
+        "count": {
+          "description": "Number of messages to return (default 50)",
+          "type": "integer"
+        },
+        "startIndex": {
+          "description": "Start index for pagination (default 0)",
+          "type": "integer"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "type",
+        "search",
+        "count",
+        "startIndex"
+      ]
+    },
+    "category": "Spool",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_ssl_certificate_counts",
+    "description": "Get counts of SSL/TLS and ACME certificates",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Certificates",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_ssl_certificates",
+    "description": "List all SSL/TLS certificates on the server",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sortBy": {
+          "description": "Sort field (optional, e.g., 'name', 'expiration')",
+          "type": "string"
+        },
+        "sortDescending": {
+          "description": "Sort descending (true/false)",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "sortBy",
+        "sortDescending"
+      ]
+    },
+    "category": "Certificates",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_task_details",
+    "description": "Get details for a specific task",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the task source",
+          "type": "string"
+        },
+        "taskId": {
+          "description": "The ID of the task to retrieve",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "taskId"
+      ]
+    },
+    "category": "Tasks",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_tasks",
+    "description": "Get all tasks from a specific task folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the task source",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Tasks",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_throttled_counts",
+    "description": "Get throttling statistics counts",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_throttled_domains",
+    "description": "Get a list of currently throttled domains",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_throttled_users",
+    "description": "Get a list of currently throttled users",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_troubleshooting_counts",
+    "description": "Get troubleshooting counts for diagnostics",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Server",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_user_data",
+    "description": "Get user data",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "kill_user_sessions",
+    "description": "Kill all active sessions for a specific user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username or email address",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "list_folder_info_by_type",
+    "description": "List folder information of folders by type",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The type of folders to list: 1=email, 2=calendars/tasks, 3=contacts, 4=notes",
+          "type": "integer"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "category": "Folders",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "list_users",
+    "description": "List all users in a specific domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name (e.g., example.com)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "category": "Users",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "move_emails",
+    "description": "Move emails to a different folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UIDs of the emails to move, comma separated",
+          "type": "string"
+        },
+        "srcFolderId": {
+          "description": "The folder the emails are in",
+          "type": "string"
+        },
+        "destFolderId": {
+          "description": "The folder to move the emails to",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "srcFolderId",
+        "destFolderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "new_or_update_calendar_event",
+    "description": "Create a new calendar event or update an existing one",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the calendar folder to add/update the event to",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The title of the event",
+          "type": "string"
+        },
+        "startTime": {
+          "description": "The start time of the event (YYYY-MM-DDTHH:mm:ss)",
+          "type": "string"
+        },
+        "endTime": {
+          "description": "The end time of the event (YYYY-MM-DDTHH:mm:ss)",
+          "type": "string"
+        },
+        "eventId": {
+          "description": "The ID of the event to update (if it exists)",
+          "type": "string"
+        },
+        "location": {
+          "description": "The location of the event",
+          "type": "string"
+        },
+        "description": {
+          "description": "The description of the event",
+          "type": "string"
+        },
+        "attendees": {
+          "description": "Comma separated list of email addresses of attendees",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "subject",
+        "startTime",
+        "endTime",
+        "eventId",
+        "location",
+        "description",
+        "attendees"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "new_or_update_task",
+    "description": "Create a new task or update an existing one",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "subject": {
+          "description": "The subject of the task",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID of the task source (if null, primary source will be used)",
+          "type": "string"
+        },
+        "taskId": {
+          "description": "The ID of the task to update (if it exists)",
+          "type": "string"
+        },
+        "description": {
+          "description": "The description of the task",
+          "type": "string"
+        },
+        "percentComplete": {
+          "description": "The percentage of the task that is complete (0-100)",
+          "type": "integer"
+        },
+        "start": {
+          "description": "The start date of the task (YYYY-MM-DD HH:mm)",
+          "type": "string"
+        },
+        "due": {
+          "description": "The due date of the task (YYYY-MM-DD HH:mm)",
+          "type": "string"
+        },
+        "reminder": {
+          "description": "The reminder date of the task (YYYY-MM-DD HH:mm)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "subject",
+        "folderId",
+        "taskId",
+        "description",
+        "percentComplete",
+        "start",
+        "due",
+        "reminder"
+      ]
+    },
+    "category": "Tasks",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "read_email_part",
+    "description": "Inventory, window, or grep any part of an email. Omit part for an inventory of html/plain/text/headers/attachments with sizes. Set part (html, plain, text derived from HTML, headers, or attachment:<filename>) to read a window with offset/limit. Set pattern to grep (literal by default; isRegex=true for regex). Window responses include totalChars, nextOffset, and hasMore so you can page through large bodies.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder ID or path where the email is located",
+          "type": "string"
+        },
+        "part": {
+          "description": "Part to read: html, plain, text (HTML converted to plaintext), headers, or attachment:<filename>. Omit or leave empty for inventory.",
+          "type": "string",
+          "default": ""
+        },
+        "pattern": {
+          "description": "Search pattern. When set, switches to grep mode instead of a windowed read.",
+          "type": "string",
+          "default": ""
+        },
+        "isRegex": {
+          "description": "Treat pattern as a regular expression. Default false (literal substring).",
+          "type": "boolean",
+          "default": false
+        },
+        "ignoreCase": {
+          "description": "Case-insensitive match. Default true.",
+          "type": "boolean",
+          "default": true
+        },
+        "offset": {
+          "description": "Window start offset in characters. Default 0.",
+          "type": "integer",
+          "default": 0
+        },
+        "limit": {
+          "description": "Window size in characters. Default 8000. 0 means through the end, still capped at 200000.",
+          "type": "integer",
+          "default": 8000
+        },
+        "contextChars": {
+          "description": "Characters of context around each grep match. Default 300.",
+          "type": "integer",
+          "default": 300
+        },
+        "maxMatches": {
+          "description": "Maximum grep matches to return. Default 20.",
+          "type": "integer",
+          "default": 20
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "folderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "refresh_acme_certificates",
+    "description": "Refresh the list of ACME certificates",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Certificates",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "reload_domain",
+    "description": "Reload a domain's configuration from disk",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name to reload",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "category": "Domains",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "remove_emails",
+    "description": "Remove emails from the system",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UIDs of the emails to remove, comma separated",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The folder the emails are in",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "folderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "remove_folder",
+    "description": "Remove folders for the user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderIds": {
+          "description": "The id's of the folders to remove, in the format 'owner/numeric_id'. Child folders are also removed. (comma separated)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderIds"
+      ]
+    },
+    "category": "Folders",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "remove_items",
+    "description": "Remove items from the system (notes, tasks, contacts, events)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "itemId": {
+          "description": "The IDs of the items to remove, comma separated (id/guid only)",
+          "type": "string"
+        },
+        "itemType": {
+          "description": "The type of the item to remove - note, task, contact, event",
+          "type": "string"
+        },
+        "calendarId": {
+          "description": "The ID of the calendar to remove the event from (required for events)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "itemId",
+        "itemType",
+        "calendarId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "rename_domain",
+    "description": "Rename a domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "oldDomainName": {
+          "description": "Current domain name",
+          "type": "string"
+        },
+        "newDomainName": {
+          "description": "New domain name",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "oldDomainName",
+        "newDomainName"
+      ]
+    },
+    "category": "Domains",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "renew_certificates_now",
+    "description": "Force immediate renewal of certificates by their GUIDs",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "certificateGuids": {
+          "description": "Comma-separated list of certificate GUIDs to renew",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "certificateGuids"
+      ]
+    },
+    "category": "Certificates",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "reply_to_email",
+    "description": "Reply to an email message",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email to reply to",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the original email is located",
+          "type": "string"
+        },
+        "body": {
+          "description": "The reply message body (HTML supported)",
+          "type": "string"
+        },
+        "replyAll": {
+          "description": "Set to true to reply to all recipients, false to reply only to sender",
+          "type": "boolean",
+          "default": false
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "body"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "reset_all_spool_messages",
+    "description": "Reset all spool messages for redelivery",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Spool",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "reset_spool_messages",
+    "description": "Reset (retry) spool messages for delivery",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fileNames": {
+          "description": "Comma-separated list of spool message filenames to reset",
+          "type": "string"
+        },
+        "spoolName": {
+          "description": "Spool name/type the messages are in",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "fileNames",
+        "spoolName"
+      ]
+    },
+    "category": "Spool",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "reset_throttled_domain",
+    "description": "Reset throttling for a specific domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name to un-throttle",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "reset_throttled_user",
+    "description": "Reset throttling for a specific user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "description": "Email address of the user to un-throttle",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "email"
+      ]
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "respond_to_meeting",
+    "description": "Respond to a meeting invitation (accept, decline, or tentative)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the calendar folder containing the meeting",
+          "type": "string"
+        },
+        "eventId": {
+          "description": "The event ID of the meeting",
+          "type": "string"
+        },
+        "response": {
+          "description": "Response type: 'accept', 'decline', or 'tentative'",
+          "type": "string"
+        },
+        "comment": {
+          "description": "Optional comment to include with your response",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "eventId",
+        "response"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "run_content_filters",
+    "description": "Run content filters against a folder to process existing emails",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folder": {
+          "description": "Folder path to run filters on (e.g., 'Inbox')",
+          "type": "string"
+        },
+        "filterIds": {
+          "description": "Optional: comma-separated filter IDs to run. If empty, runs all enabled filters.",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folder"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "search_items",
+    "description": "Search for items in the system (mail, notes, tasks, contacts, events)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "section": {
+          "description": "The area to search in: Everywhere, Email, Notes, Contacts, Calendar, Tasks",
+          "type": "string"
+        },
+        "searchQuery": {
+          "description": "The search query string",
+          "type": "string"
+        },
+        "or": {
+          "description": "Use OR logic for multiple search terms (default: false for AND logic)",
+          "type": "boolean",
+          "default": false
+        },
+        "maxEmailsToReturn": {
+          "description": "Maximum number of email results to return (default: 250)",
+          "type": "integer",
+          "default": 250
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "section",
+        "searchQuery"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "search_log_files",
+    "description": "Search server log files by type, date range, and search term. A busy day of a log can be megabytes, so the result is a WINDOW (maxChars, default 16000): narrow first with a one-day range and a specific search term (the server filters on it), optionally 'contains' to keep only matching lines, then page. The window shows the most recent part first (tail=true); the result reports totalChars, returnedChars, hasMore and nextOffset - call again with offset=nextOffset to read further back (tail=true) or forward (tail=false). Available log types: smtpLog, delivery, imapLog, popLog, spamChecks, contentfilter, administrative, generalErrors, event, ews, ewsRetrieval, activeSync, calendars, certificates, autodiscover, imapRetrieval, popRetrieval, indexing, ldapLog, activation, mailinglists, maintenance, mapi, messageId, oab, routingRules, conversion, autoCleanFolders, webdav, xmppLog",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Log type to search (e.g., 'smtpLog', 'delivery', 'spamChecks')",
+          "type": "string"
+        },
+        "startDate": {
+          "description": "Start date for log search in yyyy-MM-dd format",
+          "type": "string"
+        },
+        "endDate": {
+          "description": "End date for log search in yyyy-MM-dd format",
+          "type": "string"
+        },
+        "search": {
+          "description": "Search term the server uses to filter log entries (empty string returns all entries - avoid for busy logs)",
+          "type": "string"
+        },
+        "related": {
+          "description": "Include related log entries (useful for tracking a message through multiple log types)",
+          "type": "boolean"
+        },
+        "maxChars": {
+          "description": "Maximum characters to return (default 16000, capped at 100000).",
+          "type": "integer",
+          "default": 16000
+        },
+        "offset": {
+          "description": "Window offset in characters. With tail=true it counts back from the end of the log; with tail=false from the start. Use nextOffset from the previous result. Default 0.",
+          "type": "integer",
+          "default": 0
+        },
+        "tail": {
+          "description": "true (default): return the most recent part of the log first. false: start from the beginning.",
+          "type": "boolean",
+          "default": true
+        },
+        "contains": {
+          "description": "Optional extra filter: keep only lines containing this text (case-insensitive), applied before windowing. The result reports matchedLines of totalLines.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "type",
+        "startDate",
+        "endDate",
+        "search",
+        "related"
+      ]
+    },
+    "category": "Monitoring",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "search_users",
+    "description": "Search for users within a domain",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "search": {
+          "description": "Search query string",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain",
+        "search"
+      ]
+    },
+    "category": "Users",
+    "scope": "SysAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "send_draft",
+    "description": "Send a previously saved draft email",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "draftUid": {
+          "description": "The UID of the draft to send",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the draft is located (usually 'Drafts')",
+          "type": "string",
+          "default": "Drafts"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "draftUid"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "send_email",
+    "description": "Send a simple email",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "description": "The email addresses to send the email to, separated by commas",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The subject of the email",
+          "type": "string"
+        },
+        "body": {
+          "description": "The body of the email",
+          "type": "string"
+        },
+        "cc": {
+          "description": "The email address to cc",
+          "type": "string"
+        },
+        "bcc": {
+          "description": "The email address to bcc",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "to",
+        "subject",
+        "body",
+        "cc",
+        "bcc"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "send_email_with_attachments",
+    "description": "Send an email with previously uploaded attachments. Use upload_attachment first, then pass its attachmentGuid here. Inline images uploaded with inline=true are shown where the body has <img src=\"cid:...\"> with their htmlReference.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "description": "The email addresses to send the email to, separated by commas",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The subject of the email",
+          "type": "string"
+        },
+        "body": {
+          "description": "The body of the email (HTML supported; reference inline images as <img src=\"cid:...\">)",
+          "type": "string"
+        },
+        "attachmentGuid": {
+          "description": "The attachmentGuid returned by upload_attachment",
+          "type": "string"
+        },
+        "cc": {
+          "description": "The email address to cc",
+          "type": "string",
+          "default": ""
+        },
+        "bcc": {
+          "description": "The email address to bcc",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "to",
+        "subject",
+        "body",
+        "attachmentGuid"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "set_dkim_settings",
+    "description": "Update DKIM settings for a domain (canonicalization, header fields, max sign size)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Domain name",
+          "type": "string"
+        },
+        "canonicalizationBody": {
+          "description": "Body canonicalization algorithm: 'simple' or 'relaxed' (default: relaxed)",
+          "type": "string"
+        },
+        "canonicalizationHeader": {
+          "description": "Header canonicalization algorithm: 'simple' or 'relaxed' (default: relaxed)",
+          "type": "string"
+        },
+        "fieldOption": {
+          "description": "Header field option: 'include' or 'exclude' (default: include)",
+          "type": "string"
+        },
+        "fields": {
+          "description": "Comma-separated list of header fields to sign (e.g., 'from,to,date,subject,message-id,mime-version,content-type')",
+          "type": "string"
+        },
+        "maxMessageSign": {
+          "description": "Maximum message size in bytes to sign (default: 100)",
+          "type": "integer"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "domain",
+        "canonicalizationBody",
+        "canonicalizationHeader",
+        "fieldOption",
+        "fields",
+        "maxMessageSign"
+      ]
+    },
+    "category": "DKIM",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "set_email_properties",
+    "description": "Mark emails as read/unread, flagged/unflagged, or add tags",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UIDs of the emails to mark, comma separated",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The folder the emails are in",
+          "type": "string"
+        },
+        "read": {
+          "description": "Whether to mark the emails as read or unread",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "flagged": {
+          "description": "Whether to mark the emails as flagged or unflagged",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tags": {
+          "description": "The tags to add to the emails, comma separated",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "read",
+        "flagged",
+        "tags"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "set_trusted_senders",
+    "description": "Set trusted senders (whitelist) to bypass spam filtering. Accepts email addresses and/or domains.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "emails": {
+          "description": "Comma-separated trusted email addresses (e.g., 'friend@example.com, colleague@work.com')",
+          "type": "string",
+          "default": ""
+        },
+        "domains": {
+          "description": "Comma-separated trusted domains (e.g., 'trusted.com, company.org')",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "start_services",
+    "description": "Start one or more server services",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "services": {
+          "description": "Comma-separated list of service names to start",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "services"
+      ]
+    },
+    "category": "Server",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "stop_services",
+    "description": "Stop one or more server services",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "services": {
+          "description": "Comma-separated list of service names to stop",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "services"
+      ]
+    },
+    "category": "Server",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "unblock_ips",
+    "description": "Unblock one or more IP addresses",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ipAddresses": {
+          "description": "Comma-separated list of IP addresses to unblock",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "ipAddresses"
+      ]
+    },
+    "category": "Security",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "unblock_senders",
+    "description": "Unblock previously blocked senders. Accepts email addresses or domains.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "senders": {
+          "description": "Comma-separated email addresses or domains to unblock",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "senders"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_contact",
+    "description": "Update an existing contact in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "contactId": {
+          "description": "The ID of the contact to update",
+          "type": "string"
+        },
+        "firstName": {
+          "description": "First name of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "lastName": {
+          "description": "Last name of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "email": {
+          "description": "Email address of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "displayAs": {
+          "description": "Display name for the contact",
+          "type": "string",
+          "default": ""
+        },
+        "company": {
+          "description": "Company name",
+          "type": "string",
+          "default": ""
+        },
+        "jobTitle": {
+          "description": "Job title",
+          "type": "string",
+          "default": ""
+        },
+        "phoneNumber": {
+          "description": "Phone number",
+          "type": "string",
+          "default": ""
+        },
+        "homeStreet": {
+          "description": "Home street address",
+          "type": "string",
+          "default": ""
+        },
+        "homeCity": {
+          "description": "Home city",
+          "type": "string",
+          "default": ""
+        },
+        "homeState": {
+          "description": "Home state",
+          "type": "string",
+          "default": ""
+        },
+        "homeZip": {
+          "description": "Home zip code",
+          "type": "string",
+          "default": ""
+        },
+        "homeCountry": {
+          "description": "Home country",
+          "type": "string",
+          "default": ""
+        },
+        "busStreet": {
+          "description": "Business street address",
+          "type": "string",
+          "default": ""
+        },
+        "busCity": {
+          "description": "Business city",
+          "type": "string",
+          "default": ""
+        },
+        "busState": {
+          "description": "Business state",
+          "type": "string",
+          "default": ""
+        },
+        "busZip": {
+          "description": "Business zip code",
+          "type": "string",
+          "default": ""
+        },
+        "busCountry": {
+          "description": "Business country",
+          "type": "string",
+          "default": ""
+        },
+        "webPage": {
+          "description": "Web page URL",
+          "type": "string",
+          "default": ""
+        },
+        "additionalInfo": {
+          "description": "Additional notes about the contact (can be HTML)",
+          "type": "string",
+          "default": ""
+        },
+        "isHtml": {
+          "description": "Whether additional info is HTML formatted",
+          "type": "boolean",
+          "default": false
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "contactId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_contact_group",
+    "description": "Update an existing contact group (add/remove members or rename)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "groupId": {
+          "description": "The ID of the contact group to update",
+          "type": "string"
+        },
+        "addEmails": {
+          "description": "Comma-separated list of email addresses to add to the group",
+          "type": "string",
+          "default": ""
+        },
+        "removeEmails": {
+          "description": "Comma-separated list of email addresses to remove from the group",
+          "type": "string",
+          "default": ""
+        },
+        "newGroupName": {
+          "description": "New name for the group (leave empty to keep current name)",
+          "type": "string",
+          "default": ""
+        },
+        "newDescription": {
+          "description": "New description for the group (leave empty to keep current)",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "folderId",
+        "groupId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_content_filter",
+    "description": "Update an existing content filter. Only provided fields will be updated.\n\nSee create_content_filter for conditions and actions JSON format.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filterId": {
+          "description": "Filter ID to update (use get_content_filters to find IDs)",
+          "type": "string"
+        },
+        "title": {
+          "description": "New filter name/title (optional)",
+          "type": "string",
+          "default": ""
+        },
+        "matchType": {
+          "description": "New match type: 'And' or 'Or' (optional)",
+          "type": "string",
+          "default": ""
+        },
+        "conditions": {
+          "description": "New conditions JSON array (optional)",
+          "type": "string",
+          "default": ""
+        },
+        "actions": {
+          "description": "New actions JSON array (optional)",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "filterId"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_folder",
+    "description": "Update or create a folder for the user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The type of the folder to update (email, calendar, notes, tasks, contacts)",
+          "type": "string"
+        },
+        "name": {
+          "description": "The new name for the folder",
+          "type": "string"
+        },
+        "parentFolderId": {
+          "description": "The parent folder ID (owner/numeric_id) to nest the folder in (only for email create/update)",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID (owner/numeric_id) of the folder to update. If omitted, a new folder is created",
+          "type": "string"
+        },
+        "color": {
+          "description": "The hex color for the folder (only for calendars and tasks, e.g., #FF0000)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "parentFolderId",
+        "folderId",
+        "color"
+      ]
+    },
+    "category": "Folders",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_note",
+    "description": "Update a note in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "noteId": {
+          "description": "The ID of the note to update",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        },
+        "subject": {
+          "description": "Title for the note",
+          "type": "string"
+        },
+        "content": {
+          "description": "The html or plain text content of the note",
+          "type": "string"
+        },
+        "color": {
+          "description": "The hex color to associate with the note",
+          "type": "string"
+        },
+        "isHtml": {
+          "description": "Whether the content is HTML",
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "noteId",
+        "folderId",
+        "subject",
+        "content",
+        "color",
+        "isHtml"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "upload_attachment",
+    "description": "Upload a file to attach to an email, then send it with send_email_with_attachments using the returned attachmentGuid. Give the file as exactly one of: base64Content (any file, base64-encoded), text (a text file's contents, e.g. .txt/.csv/.ics/.html) or filePath (only on a local server that shares your filesystem). For an image shown inside the HTML body, set inline=true and use the returned htmlReference as the src: <img src=\"cid:...\">. SmarterMail assigns the content ID, so always use the returned value. Several files go in one email by passing the first call's attachmentGuid to the next calls.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fileName": {
+          "description": "The attachment's file name, e.g. report.pdf or banner.png. Required with base64Content or text; the extension sets the content type unless contentType is given.",
+          "type": "string",
+          "default": ""
+        },
+        "base64Content": {
+          "description": "The file's bytes, base64-encoded (a data: URL is accepted too).",
+          "type": "string",
+          "default": ""
+        },
+        "text": {
+          "description": "The file's contents as text (sent as UTF-8). Use for text files instead of base64Content.",
+          "type": "string",
+          "default": ""
+        },
+        "filePath": {
+          "description": "Path to a file on the MCP server's own filesystem. Only works when the server shares your filesystem (a local stdio server); otherwise use base64Content or text.",
+          "type": "string",
+          "default": ""
+        },
+        "contentType": {
+          "description": "Optional MIME type, e.g. image/png. Defaults from the file name's extension.",
+          "type": "string",
+          "default": ""
+        },
+        "inline": {
+          "description": "true to embed the file (an image) in the HTML body via cid: instead of attaching it. The result's htmlReference is the src to use.",
+          "type": "boolean",
+          "default": false
+        },
+        "attachmentGuid": {
+          "description": "Optional: the attachmentGuid from an earlier upload_attachment call, to add this file to the same email.",
+          "type": "string",
+          "default": ""
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "user@example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'user@example.com' can; it is used if omitted."
+        }
+      }
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "upload_ssl_certificate",
+    "description": "Upload an SSL/TLS certificate to the server",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filename": {
+          "description": "Certificate filename",
+          "type": "string"
+        },
+        "data": {
+          "description": "Base64-encoded certificate data",
+          "type": "string"
+        },
+        "password": {
+          "description": "Certificate password (if encrypted, otherwise empty)",
+          "type": "string"
+        },
+        "account": {
+          "type": "string",
+          "enum": [
+            "sysadmin:admin@mail.example.com"
+          ],
+          "description": "Which signed-in account to run this as. Only 'sysadmin:admin@mail.example.com' can; it is used if omitted."
+        }
+      },
+      "required": [
+        "filename",
+        "data",
+        "password"
+      ]
+    },
+    "category": "Certificates",
+    "scope": "SysAdmin",
+    "write": true,
+    "destructive": false
+  }
+]
