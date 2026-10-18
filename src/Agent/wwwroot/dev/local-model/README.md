@@ -62,6 +62,12 @@ in-browser model box (or paste a key and pick the model later from the picker).
   raw model output with its special tokens.
 - **Invalid tool calls** (wrong argument names, bad types, unknown tools, unreadable call markup) show
   as failed tool cards answered by the browser; they never reach the server. The model should retry.
+- **Write gate**: the app, not the model, asks before every change. A write tool call waits on a
+  card under its tool card (tool, account, every argument in full, hidden characters marked) with
+  **Approve** / **Deny**; destructive tools get a red card. Deny (or **Stop** while the card waits)
+  sends nothing to the server and tells the model the user declined and not to retry. In the eval,
+  LFM2.5 made writes without asking in 32 of 32 runs, whatever the prompt said. OpenRouter models
+  are not gated this way.
 - **Scheduled tasks** never offer the in-browser model: a new task starts from the default OpenRouter
   model, and saving one with a `local:` model is refused.
 

@@ -721,3 +721,12 @@ dialog.code-modal { width: min(520px, calc(100vw - 24px)); }
 .local-debug { display: none; margin-top: 4px; }
 .local-debug .tool-label { margin-top: 8px; }
 .messages.local-debug-on .local-debug { display: block; }
+
+/* the write gate's card (a tool card waiting for Approve / Deny); destructive ones in red */
+.local-confirm { border-color: oklch(75% 0.12 80 / 0.55); }
+.local-confirm.destructive { background: oklch(13% 0.04 25); border: 2px solid oklch(60% 0.22 25 / 0.8); }
+.local-confirm.destructive .tool-name, .local-confirm.destructive .tool-status.running { color: var(--red); }
+.local-confirm-note { margin: 0 0 6px; font-size: .82rem; color: var(--amber); }
+.local-confirm.destructive .local-confirm-note { color: var(--red); font-weight: 600; }
+.local-confirm .approval-args { margin-top: 0; }
+.local-confirm-actions { display: flex; gap: 8px; margin-top: 10px; }

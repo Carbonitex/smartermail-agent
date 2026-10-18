@@ -11,6 +11,8 @@
  *    key field (a local-model chat may have started without one);
  *  - runTurn's options for a local turn: `streamImpl` and the guarded tool
  *    runners (calls the model got wrong are answered here, not by the server);
+ *  - the write gate: every write the model calls waits for Approve / Deny on a
+ *    card in the chat before it reaches the server (below);
  *  - per round: the thinking text, tokens, tok/s and "tools offered: N of M",
  *    and behind the Debug switch the tools offered and the raw output.
  *
@@ -115,9 +117,75 @@ function compact(n) {
   return `${(n / 1000).toFixed(n < 10000 ? 1 : 0).replace(/\.0$/, '')}k`;
 }
 
+/* ---------------------------------------------------------- the write gate */
+
+/*
+ * The system prompt asks every model to state a change and wait for the user's
+ * yes in a separate turn. LFM2.5 2.6B ignored that in every eval run (32 of 32
+ * writes went straight through), so for the local model the app asks instead:
+ * a write tool call waits for Approve / Deny on a card in the chat, and nothing
+ * reaches the server until Approve. OpenRouter turns never pass through here.
+ *
+ * Gated: every tool the tool list does not mark `write: false`, so a name the
+ * list does not know counts as a write (fail closed). Read-only accounts are
+ * not special-cased: the browser does not resolve `account` (the server does,
+ * and the tool list already offers a write only where a read-write account can
+ * run it), and a write the server would refuse with 403 costs one click, never
+ * a change.
+ */
+
+export const GATE_DECLINED = 'The user declined this action. Do not retry it; ask what they want instead.';
+export const GATE_CANCELLED = 'The user stopped this turn before approving this action, so it was not performed. Do not retry it; ask what they want instead.';
+
+/** null when a tool runs without asking, else `{ destructive }` for the card. `info` = its tool list entry, or null. */
+export function writeGate(info) {
+  if (info && info.write === false) return null;
+  return { destructive: !!(info && info.destructive === true) };
+}
+
+/** The tool result for a gated call that did not run: `'cancel'` (Stop), anything else is a decline. */
+export function gateRefusal(outcome) {
+  return { isError: true, content: outcome === 'cancel' ? GATE_CANCELLED : GATE_DECLINED };
+}
+
+/**
+ * `callTool` behind the gate. A gated call runs only when
+ * `confirm({ name, args, destructive, signal })` resolves to `'approve'`
+ * before `signal` aborts; `'deny'`, `'cancel'`, any other value or a throw
+ * answer the model with gateRefusal and make no call. No DOM: the card is
+ * confirm's job (confirmCard below), so node tests pass a fake.
+ */
+export function gateCallTool(callTool, { toolInfo, confirm, signal = null }) {
+  return async (name, args) => {
+    const gate = writeGate(toolInfo(name));
+    if (!gate) return callTool(name, args);
+    if (signal && signal.aborted) return gateRefusal('cancel');
+    let outcome;
+    try {
+      outcome = await untilAborted(confirm({ name, args: args || {}, destructive: gate.destructive, signal }), signal);
+    } catch {
+      outcome = 'deny';
+    }
+    if (signal && signal.aborted) return gateRefusal('cancel');
+    return outcome === 'approve' ? callTool(name, args) : gateRefusal(outcome);
+  };
+}
+
+/** `promise`, or `'cancel'` as soon as `signal` aborts (a confirm that never settles cannot hold Stop up). */
+function untilAborted(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const onAbort = () => resolve('cancel');
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 /* ----------------------------------------------------------------- the bar */
 
-let hooks = null;     // { bar, messages, scroll(), isBusy(), hasKey(), saveKey(key), toolCount(), categoryOf(name), isWrite(name) }
+// { bar, messages, scroll(), isBusy(), hasKey(), saveKey(key), toolCount(), categoryOf(name), isWrite(name),
+//   toolInfo(name), accountLabel(handle), argumentsTable(argsJson) }
+let hooks = null;
 let llm = null;       // the local-llm.js module, once imported
 let stream = null;    // createLocalStream(), one per page
 let loading = null;   // Promise of loadLocalModel's result while loading / once loaded
@@ -266,9 +334,11 @@ async function unload() {
 
 /**
  * runTurn's options for a local turn: the stream, and callTool / localTools
- * wrapped so a call the model got wrong is answered here with what to fix.
+ * wrapped so a call the model got wrong is answered here with what to fix, and
+ * a write waits for the user (the gate, inside the guard: a call the guard
+ * answers itself never asks). `signal` is the turn's: Stop cancels a pending card.
  */
-export async function turnOptions({ callTool, localTools }) {
+export async function turnOptions({ callTool, localTools, signal = null }) {
   llm = llm || await import('./local-llm.js');
   if (!stream) {
     stream = llm.createLocalStream({
@@ -277,8 +347,67 @@ export async function turnOptions({ callTool, localTools }) {
       isWrite: (name) => hooks.isWrite(name)
     });
   }
-  const guarded = stream.guard({ callTool, localTools });
+  const gated = gateCallTool(callTool, { toolInfo: (name) => hooks.toolInfo(name), confirm: confirmCard, signal });
+  const guarded = stream.guard({ callTool: gated, localTools });
   return { streamImpl: stream, callTool: guarded.callTool, localTools: guarded.localTools };
+}
+
+const WRITE_NOTE = 'The in-browser model wants to make this change. Nothing is sent to the mail server until you approve.';
+const DESTRUCTIVE_NOTE = 'Destructive: this deletes, disables or disconnects something, and it cannot be undone from here. Check every value before you approve.';
+
+/**
+ * The gate's card, under the call's tool card: tool, account, every argument in
+ * full (approvals.js's review table: text nodes only, hidden characters shown
+ * as ⟦U+XXXX⟧, long values in a scrolling block) and Approve / Deny. Resolves
+ * to 'approve', 'deny' or 'cancel' (the turn's signal aborted). Neither button
+ * takes focus, so an Enter meant for the message box cannot approve anything.
+ */
+function confirmCard({ name, args, destructive, signal }) {
+  const card = node('div', `tool-card open local-confirm${destructive ? ' destructive' : ''}`);
+  card.setAttribute('role', 'group');
+  card.setAttribute('aria-label', `Approve ${name}?`);
+  const handle = typeof args.account === 'string' ? args.account : '';
+  const status = node('span', 'tool-status running', destructive ? 'destructive: approve?' : 'approve?');
+  const head = node('div', 'tool-head');
+  head.append(
+    node('span', 'tool-caret', '▶'),
+    node('span', 'tool-name', name),
+    node('span', 'tool-account', hooks.accountLabel(handle) || 'the account that can run it'),
+    node('span', 'tool-summary'),
+    status
+  );
+  const body = node('div', 'tool-body');
+  const { account: _account, ...shown } = args;
+  const actions = node('div', 'local-confirm-actions');
+  body.append(node('p', 'local-confirm-note', destructive ? DESTRUCTIVE_NOTE : WRITE_NOTE),
+    hooks.argumentsTable(JSON.stringify(shown)), actions);
+  card.append(head, body);
+  hooks.messages.appendChild(card);
+  hooks.scroll();
+
+  return new Promise((resolve) => {
+    let done = false;
+    const settle = (outcome) => {
+      if (done) return;
+      done = true;
+      if (signal) signal.removeEventListener('abort', onAbort);
+      actions.remove();
+      card.classList.remove('open');
+      card.classList.add('settled');
+      status.className = `tool-status ${outcome === 'approve' ? 'ok' : 'err'}`;
+      status.textContent = outcome === 'approve' ? '✓ approved' : outcome === 'deny' ? '✕ declined' : '✕ cancelled';
+      head.addEventListener('click', () => card.classList.toggle('open'));
+      resolve(outcome);
+    };
+    const onAbort = () => settle('cancel');
+    const approve = button(destructive ? `Approve ${name}` : 'Approve', () => settle('approve'));
+    approve.className = `btn btn-small ${destructive ? 'btn-danger' : 'btn-primary'}`;
+    actions.append(approve, button('Deny', () => settle('deny'), 'The model is told you declined and asked not to retry'));
+    if (signal) {
+      if (signal.aborted) return settle('cancel');
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
 }
 
 /**

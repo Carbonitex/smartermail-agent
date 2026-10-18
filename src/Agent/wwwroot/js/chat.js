@@ -25,6 +25,7 @@ import {
 } from './llm.js';
 import { ArtifactStore, ANALYZE_RESULT_TOOL, ARTIFACT_THRESHOLD, DEFAULT_ANALYSIS_MODEL, formatSize } from './artifacts.js';
 import { runAnalyzeResult } from './subagent.js';
+import { argumentsTable } from './approvals.js';   // local model: the write gate's card
 // EXPERIMENTAL in-browser model: every use in this file is marked "local model".
 import * as localModel from './local-model-ui.js';
 
@@ -2053,7 +2054,8 @@ async function drive() {
     };
     if (local) {
       // local model: its own stream, invalid calls answered in the browser, thinking + stats per round.
-      ({ streamImpl, callTool, localTools } = await localModel.turnOptions({ callTool, localTools }));
+      // local model: writes also wait for Approve / Deny on a card (the write gate); Stop cancels one.
+      ({ streamImpl, callTool, localTools } = await localModel.turnOptions({ callTool, localTools, signal: controller.signal }));
       ui = localModel.wrapUi(ui);
     }
     await runTurn({
@@ -2161,7 +2163,14 @@ function initLocalModel() {
     isWrite: (name) => {
       const t = state.toolList.find((x) => x && x.name === name);
       return t ? t.write === true : undefined;
-    }
+    },
+    // The write gate's card: the tool's flags, the account as the tool cards name it, the arguments as approvals review them.
+    toolInfo: (name) => state.toolList.find((x) => x && x.name === name) || null,
+    accountLabel: (handle) => {
+      const accounts = sessionAccounts(state.session);
+      return accountFor(handle || (accounts.length === 1 ? accounts[0].handle : ''));
+    },
+    argumentsTable
   });
 }
 
