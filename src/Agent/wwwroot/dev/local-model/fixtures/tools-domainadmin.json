@@ -1,0 +1,5291 @@
+[
+  {
+    "name": "block_senders",
+    "description": "Block email senders to prevent delivery. Accepts email addresses or domains.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "senders": {
+          "description": "Comma-separated email addresses or domains to block (e.g., 'spam@example.com, baddomain.com')",
+          "type": "string"
+        }
+      },
+      "required": [
+        "senders"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "check_sender_blocked",
+    "description": "Check if a sender email address is blocked",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "description": "The email address to check",
+          "type": "string"
+        }
+      },
+      "required": [
+        "email"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "check_sender_trusted",
+    "description": "Check if a sender email address is trusted (whitelisted)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "description": "The email address to check",
+          "type": "string"
+        }
+      },
+      "required": [
+        "email"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "create_contact",
+    "description": "Create a new contact in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "firstName": {
+          "description": "First name of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "lastName": {
+          "description": "Last name of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "email": {
+          "description": "Email address of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "displayAs": {
+          "description": "Display name for the contact",
+          "type": "string",
+          "default": ""
+        },
+        "company": {
+          "description": "Company name",
+          "type": "string",
+          "default": ""
+        },
+        "jobTitle": {
+          "description": "Job title",
+          "type": "string",
+          "default": ""
+        },
+        "phoneNumber": {
+          "description": "Phone number",
+          "type": "string",
+          "default": ""
+        },
+        "homeStreet": {
+          "description": "Home street address",
+          "type": "string",
+          "default": ""
+        },
+        "homeCity": {
+          "description": "Home city",
+          "type": "string",
+          "default": ""
+        },
+        "homeState": {
+          "description": "Home state",
+          "type": "string",
+          "default": ""
+        },
+        "homeZip": {
+          "description": "Home zip code",
+          "type": "string",
+          "default": ""
+        },
+        "homeCountry": {
+          "description": "Home country",
+          "type": "string",
+          "default": ""
+        },
+        "busStreet": {
+          "description": "Business street address",
+          "type": "string",
+          "default": ""
+        },
+        "busCity": {
+          "description": "Business city",
+          "type": "string",
+          "default": ""
+        },
+        "busState": {
+          "description": "Business state",
+          "type": "string",
+          "default": ""
+        },
+        "busZip": {
+          "description": "Business zip code",
+          "type": "string",
+          "default": ""
+        },
+        "busCountry": {
+          "description": "Business country",
+          "type": "string",
+          "default": ""
+        },
+        "webPage": {
+          "description": "Web page URL",
+          "type": "string",
+          "default": ""
+        },
+        "additionalInfo": {
+          "description": "Additional notes about the contact (can be HTML)",
+          "type": "string",
+          "default": ""
+        },
+        "isHtml": {
+          "description": "Whether additional info is HTML formatted",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_contact_group",
+    "description": "Create a new contact group in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "groupName": {
+          "description": "The name of the contact group",
+          "type": "string"
+        },
+        "memberEmails": {
+          "description": "Comma-separated list of email addresses to include in the group",
+          "type": "string",
+          "default": ""
+        },
+        "description": {
+          "description": "Optional description for the group",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "folderId",
+        "groupName"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_content_filter",
+    "description": "Create a content filter (inbox rule).\n\nConditions JSON format: [{\"fieldType\": 0, \"filterType\": 2, \"searchArguments\": [\"value\"]}]\n- fieldType: 0=FromAddress, 1=FromDomain, 3=WordsInSubject, 4=WordsInBody, 10=ToAddress, 16=HasAttachments, 17=AttachmentFilename\n- filterType: 0=Equals, 1=DoesntEqual, 2=Contains, 3=DoesntContain\n\nActions JSON format: [{\"actionType\": 4, \"argument\": \"FolderName\"}]\n- actionType: 1=Delete, 4=MoveToFolder (arg=folder), 5=AddHeader (arg=Header:Value), 6=PrefixSubject (arg=prefix), 7=Forward (arg=email), 8=MarkAsRead\n\nExample: Create filter to move newsletters to a folder:\n  title: \"Newsletter Filter\"\n  matchType: \"And\"\n  conditions: [{\"fieldType\": 0, \"filterType\": 2, \"searchArguments\": [\"newsletter@\"]}]\n  actions: [{\"actionType\": 4, \"argument\": \"Newsletters\"}]",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "description": "Filter name/title",
+          "type": "string"
+        },
+        "matchType": {
+          "description": "Match type: 'And' (all conditions must match) or 'Or' (any condition matches)",
+          "type": "string",
+          "default": "And"
+        },
+        "conditions": {
+          "description": "JSON array of filter conditions",
+          "type": "string",
+          "default": "[]"
+        },
+        "actions": {
+          "description": "JSON array of filter actions",
+          "type": "string",
+          "default": "[]"
+        }
+      },
+      "required": [
+        "title"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_content_filter_simple",
+    "description": "Create a content filter (inbox rule) using simple human-readable descriptions instead of JSON.\n\nCondition examples (separate multiple with semicolons):\n  'from contains newsletter@' - match sender address containing text\n  'from equals user@example.com' - match exact sender address\n  'from domain is example.com' - match sender domain\n  'subject contains invoice' - match subject line\n  'body contains unsubscribe' - match email body\n  'to contains sales@' - match recipient\n  'has attachments' - match emails with attachments\n  'attachment name contains .pdf' - match attachment filename\n  'attachment extension is pdf' - match attachment extension\n\nAction examples (separate multiple with semicolons):\n  'move to Newsletters' - move to folder\n  'delete' - delete the email\n  'mark as read' - mark as read\n  'forward to bob@example.com' - forward to address\n  'prefix subject with [NEWS]' - add prefix to subject\n  'set priority high' - set priority (high/normal/low)\n  'flag' - flag for follow up\n\nSupports negation: 'from does not contain X', 'subject doesn't contain X'",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Filter name/title",
+          "type": "string"
+        },
+        "when": {
+          "description": "Condition(s) in plain English. Separate multiple conditions with semicolons.",
+          "type": "string"
+        },
+        "then": {
+          "description": "Action(s) in plain English. Separate multiple actions with semicolons.",
+          "type": "string"
+        },
+        "matchAll": {
+          "description": "Whether all conditions must match (true) or any condition can match (false). Default: true",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "name",
+        "when",
+        "then"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_draft",
+    "description": "Save an email as a draft without sending",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "description": "The email addresses to send to, comma separated",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The subject of the email",
+          "type": "string"
+        },
+        "body": {
+          "description": "The body of the email (HTML supported)",
+          "type": "string"
+        },
+        "cc": {
+          "description": "The email addresses to CC, comma separated",
+          "type": "string",
+          "default": ""
+        },
+        "bcc": {
+          "description": "The email addresses to BCC, comma separated",
+          "type": "string",
+          "default": ""
+        },
+        "replyToUid": {
+          "description": "Optional: UID of email being replied to",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "replyToFolder": {
+          "description": "Optional: Folder of email being replied to",
+          "type": "string",
+          "default": ""
+        },
+        "isReply": {
+          "description": "Set to true if this is a reply",
+          "type": "boolean",
+          "default": false
+        },
+        "isForward": {
+          "description": "Set to true if this is a forward",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "to",
+        "subject",
+        "body"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_folder",
+    "description": "Create a new folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The name of the new folder",
+          "type": "string"
+        },
+        "type": {
+          "description": "The type of the new folder: 1=email, 2=calendar, 3=contact, 4=note, 5=task",
+          "type": "integer"
+        },
+        "parentFolderId": {
+          "description": "The ID of the parent folder (for mail folders)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "parentFolderId"
+      ]
+    },
+    "category": "Folders",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "create_note",
+    "description": "Create a new note in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        },
+        "subject": {
+          "description": "Title for the note",
+          "type": "string"
+        },
+        "content": {
+          "description": "The html or plain text content of the note",
+          "type": "string"
+        },
+        "color": {
+          "description": "The color to associate with the note (white, yellow, pink, green, blue)",
+          "type": "string"
+        },
+        "isHtml": {
+          "description": "Whether the content is HTML",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "folderId",
+        "subject",
+        "content",
+        "color",
+        "isHtml"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "delete_calendar_event",
+    "description": "Delete a calendar event",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the calendar folder to delete the event from",
+          "type": "string"
+        },
+        "eventId": {
+          "description": "The ID of the event to delete",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "eventId"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_contact_group",
+    "description": "Delete a contact group from the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "groupId": {
+          "description": "The ID of the contact group to delete",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "groupId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_contacts",
+    "description": "Delete contacts from the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "contactIds": {
+          "description": "The IDs of the contacts to delete",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "contactIds"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_content_filters",
+    "description": "Delete content filters by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filterIds": {
+          "description": "Comma-separated filter IDs to delete",
+          "type": "string"
+        }
+      },
+      "required": [
+        "filterIds"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_note",
+    "description": "Delete a note in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "noteId": {
+          "description": "The ID of the note to delete",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "noteId",
+        "folderId"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "delete_task",
+    "description": "Delete a task from the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the task source",
+          "type": "string"
+        },
+        "taskId": {
+          "description": "The ID of the task to delete",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "taskId"
+      ]
+    },
+    "category": "Tasks",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_add_content_filter",
+    "description": "Add a content filter that applies to every user in your domain. conditions: JSON array of {fieldType, filterType, searchArguments, applyLogicalNot?, isWildcard?}; fieldType is a name such as FromAddress, FromDomain, WordsInSubject, WordsInBody, WordsInSubjectOrBody, WordsInFrom, WordsInTo, WordsInHeaders, ToAddress, ToDomain, CcAddress, AttHas, AttFilename, AttExtension, MessageSizeOver, MessageSizeUnder, SendingServerIP, SpamWeight, IsAuthenticated, AutomatedMessage; filterType is Equals, DoesntEqual, Contains or DoesntContain; searchArguments is a list of strings. actions: JSON array of {actionType, argument?}; actionType is one of NoAction, Delete, Bounce, MoveToFolder (argument = folder name), AddHeader (argument = header line), PrefixSubject (argument = prefix text), Forward (argument = address), Read, SetPriority, FollowUp. Example: conditions=[{\"fieldType\":\"FromDomain\",\"filterType\":\"Equals\",\"searchArguments\":[\"spammy.example\"]}], actions=[{\"actionType\":\"Delete\"}].",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "description": "Filter name",
+          "type": "string"
+        },
+        "conditions": {
+          "description": "JSON array of conditions (see tool description)",
+          "type": "string"
+        },
+        "actions": {
+          "description": "JSON array of actions (see tool description)",
+          "type": "string"
+        },
+        "matchType": {
+          "description": "'And' (all conditions must match, default) or 'Or' (any condition)",
+          "type": "string",
+          "default": "And"
+        },
+        "enabled": {
+          "description": "Whether the filter is active (default true)",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "title",
+        "conditions",
+        "actions"
+      ]
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_add_domain_alias",
+    "description": "Add a domain alias: mail to <anything>@aliasName will be delivered to the matching mailbox in your domain. Optionally require the alias's MX records to point here first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "aliasName": {
+          "description": "The domain alias name, e.g. 'example.net'",
+          "type": "string"
+        },
+        "checkMx": {
+          "description": "Refuse unless the alias's MX records point at this server (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "aliasName"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_add_mailing_list_posters",
+    "description": "Add email addresses to a mailing list's approved posters (allowed to post) or to its banned users (may neither post nor subscribe). Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        },
+        "emailAddresses": {
+          "description": "Email addresses to add",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "listType": {
+          "description": "Which list: 'approved' (default) for approved posters, or 'banned' for banned users",
+          "type": "string",
+          "default": "approved"
+        }
+      },
+      "required": [
+        "mailingListId",
+        "emailAddresses"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_add_mailing_list_subscribers",
+    "description": "Subscribe one or more email addresses to a mailing list, as regular subscribers or as digest subscribers. If the list uses double opt-in, SmarterMail may email each address a confirmation first. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        },
+        "emailAddresses": {
+          "description": "Email addresses to subscribe",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "digest": {
+          "description": "True to add them as digest subscribers instead of regular subscribers (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "mailingListId",
+        "emailAddresses"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_check_address_available",
+    "description": "Check whether an address (local part, e.g. 'sales') is free to use for a new user or alias in your domain. success:true means it is available.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "Local part to check, e.g. 'sales' (a full address is trimmed to its local part)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_clear_subscriber_bounces",
+    "description": "Reset a subscriber's bounce count to zero, e.g. after their mailbox problem was fixed, so the list stops treating them as bouncing. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "emailAddress": {
+          "description": "The subscriber's email address",
+          "type": "string"
+        }
+      },
+      "required": [
+        "emailAddress"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_create_alias",
+    "description": "Create an email alias in your domain that delivers mail to one or more target addresses.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Alias name (local part only, e.g. 'sales')",
+          "type": "string"
+        },
+        "targets": {
+          "description": "Email addresses that receive mail sent to the alias",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "displayName": {
+          "description": "Display name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "description": "Description of the alias purpose (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "internalOnly": {
+          "description": "True to only accept mail from inside the domain (default false)",
+          "type": "boolean",
+          "default": false
+        },
+        "allowSending": {
+          "description": "True to let target users send mail as this alias (default false)",
+          "type": "boolean",
+          "default": false
+        },
+        "hideFromGAL": {
+          "description": "True to hide the alias from the Global Address List (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "name",
+        "targets"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_create_dkim_rollover",
+    "description": "Start a DKIM key rotation: generates a new key pair that stays pending (the current key keeps signing) until its DNS record is published and verified with domain_verify_dkim(rollover=true). Returns the new selector and public key to publish.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "keySize": {
+          "description": "Key size in bits: 1024, 2048 (default) or 4096",
+          "type": "integer",
+          "default": 2048
+        }
+      }
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_create_mailing_list",
+    "description": "Create a new mailing list in your domain. Anything not given here uses SmarterMail's defaults; change more with domain_update_mailing_list. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "listAddress": {
+          "description": "List address, local part only (e.g. 'announce' becomes announce@<your domain>)",
+          "type": "string"
+        },
+        "moderatorAddress": {
+          "description": "Email address of the list moderator",
+          "type": "string"
+        },
+        "description": {
+          "description": "Description of the list's purpose (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "postingPermissions": {
+          "description": "Who may post: 'anyone', 'subscribers' or 'moderator' (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "enableDigest": {
+          "description": "True to enable digest delivery (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "doubleOptIn": {
+          "description": "True to require subscribers to confirm by email (double opt-in) (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "disableSubscriptions": {
+          "description": "True to stop new subscriptions (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "subjectPrefix": {
+          "description": "Text to prefix every list message's subject with, e.g. '[announce]' (optional; turns on the prefix)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "showInGal": {
+          "description": "True to show the list in the Global Address List (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "listAddress",
+        "moderatorAddress"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_create_shared_resource",
+    "description": "Create a domain-level shared resource: a shared calendar, conference room, piece of equipment, address book, task list or note list. Rooms and equipment can be booked by inviting their email alias.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Display name",
+          "type": "string"
+        },
+        "resourceType": {
+          "description": "'calendar', 'conference_room', 'equipment', 'address_book', 'tasks' or 'notes'",
+          "type": "string"
+        },
+        "emailAlias": {
+          "description": "Email alias (local part) for booking rooms/equipment (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "users": {
+          "description": "Usernames to give access, e.g. ['jane','bob'] (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "userAccess": {
+          "description": "Access level for those users: 'availability', 'read', 'manage' or 'owner' (default 'read')",
+          "type": "string",
+          "default": "read"
+        },
+        "bookingWindow": {
+          "description": "How far ahead rooms/equipment can be booked: 'three_months', 'six_months', 'one_year', 'two_years' or 'no_limit' (default 'no_limit')",
+          "type": "string",
+          "default": "no_limit"
+        },
+        "enabled": {
+          "description": "Create it enabled (default true)",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "name",
+        "resourceType"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_create_signature",
+    "description": "Create a domain signature template. The text may be HTML and may contain SmarterMail signature variables. Assign it with domain_set_signature_mapping.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Signature name",
+          "type": "string"
+        },
+        "text": {
+          "description": "Signature body (HTML allowed)",
+          "type": "string"
+        },
+        "isDefault": {
+          "description": "Make this the domain's default signature (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "name",
+        "text"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_create_user",
+    "description": "Create a new user in your domain. Domain default settings apply to anything not given here.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part only, e.g. 'jane'); the address becomes jane@<your domain>",
+          "type": "string"
+        },
+        "password": {
+          "description": "Initial password; must meet the domain's password requirements",
+          "type": "string"
+        },
+        "fullName": {
+          "description": "Full display name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "maxMailboxSizeMb": {
+          "description": "Maximum mailbox size in MB (optional; 0 means no limit; omit to use the domain default)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "isDomainAdmin": {
+          "description": "True to make the new user a domain administrator (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "username",
+        "password"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_create_user_group",
+    "description": "Create a user group in your domain. Groups are used to assign permissions, signatures and shared resources to several users at once.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Group name",
+          "type": "string"
+        },
+        "members": {
+          "description": "Initial members: usernames (local parts) or email addresses in your domain (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "enabled": {
+          "description": "Whether the group is active (default true)",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_delete_alias",
+    "description": "Permanently delete an alias from your domain. Mail sent to it will no longer be delivered.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Alias name (local part, e.g. 'sales')",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_content_filters",
+    "description": "Permanently delete domain-level content filters by id. They stop applying to every user in your domain.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "description": "Filter ids to delete",
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      },
+      "required": [
+        "ids"
+      ]
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_dkim_rollover",
+    "description": "Cancel a pending DKIM key rotation: deletes the pending rollover key without activating it. The active key is unaffected.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_domain_aliases",
+    "description": "Delete one or more domain aliases. Mail to those domain names will no longer be delivered to this domain.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "aliasNames": {
+          "description": "Domain alias names to delete, e.g. ['example.net']",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "aliasNames"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_event_hooks",
+    "description": "Delete one or more event hooks. They stop firing immediately.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "description": "Event hook ids to delete",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "ids"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_mailing_lists",
+    "description": "Permanently delete one or more mailing lists, with all their subscribers, posters and settings. This cannot be undone. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListIds": {
+          "description": "Mailing list ids (from domain_list_mailing_lists)",
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      },
+      "required": [
+        "mailingListIds"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_shared_resource",
+    "description": "Permanently delete a domain shared resource and everything in it (events, contacts, tasks or notes). Cannot be undone.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "folderId from domain_list_shared_resources",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_signature",
+    "description": "Permanently delete a domain signature template. Anyone mapped to it stops getting it on outgoing mail.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Signature id (from domain_list_signatures)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_subscriber_fields",
+    "description": "Delete one or more custom subscriber fields, and every subscriber's value for them. This cannot be undone. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fieldIds": {
+          "description": "Field ids (from domain_list_subscriber_fields)",
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      },
+      "required": [
+        "fieldIds"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_user_groups",
+    "description": "Delete one or more user groups in your domain. The member users are not deleted, but lose whatever the group granted them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupIds": {
+          "description": "User group ids (from domain_list_user_groups)",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "groupIds"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_delete_users",
+    "description": "Permanently delete one or more users in your domain and all of their mail data. Cannot delete the primary domain admin or yourself. This cannot be undone.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "usernames": {
+          "description": "Usernames (local parts, e.g. 'jane') or full email addresses in your domain",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "usernames"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_disable_dkim",
+    "description": "Turn off DKIM signing for your domain. Any pending DKIM key is deleted. Outgoing mail stops being signed immediately, which can hurt deliverability where receivers expect DKIM.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_disable_two_factor",
+    "description": "Turn off two-step authentication for one user in your domain, e.g. when they lost their authenticator device. They can sign in with just their password until they set it up again.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part) or email address in your domain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_disable_users",
+    "description": "Disable (or re-enable) one or more users in your domain. A disabled user cannot sign in.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "usernames": {
+          "description": "Usernames (local parts, e.g. 'jane') or full email addresses in your domain",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "disable": {
+          "description": "True to disable the users (default), false to enable them again",
+          "type": "boolean",
+          "default": true
+        },
+        "allowMail": {
+          "description": "When disabling: true to keep delivering incoming mail to the disabled mailboxes (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "usernames"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_disconnect_users",
+    "description": "Force users in your domain to sign in again: ends their webmail sessions and/or drops their open protocol connections (IMAP, POP, ActiveSync, …). Useful after a password change or a suspected compromise.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "usernames": {
+          "description": "Usernames (local parts) or email addresses in your domain",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "webmailSessions": {
+          "description": "End webmail sessions (default true)",
+          "type": "boolean",
+          "default": true
+        },
+        "protocolConnections": {
+          "description": "Drop protocol connections such as IMAP, POP and ActiveSync (default true)",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "usernames"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_enable_dkim",
+    "description": "Turn on DKIM signing for your domain. If no DKIM key exists yet, a pending key is created; publish its selector and public key in DNS (see domain_get_dkim), then run domain_verify_dkim. Without forceActivation an active key that fails DNS validation is moved back to pending.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "forceActivation": {
+          "description": "Force the key active even if DNS validation fails (default false; not recommended — receivers will fail DKIM checks until DNS is right)",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_expire_user_passwords",
+    "description": "Mark the passwords of one or more users in your domain as expired, so they must choose a new one at their next sign-in.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "usernames": {
+          "description": "Usernames (local parts) or email addresses in your domain",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "usernames"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_get_account_counts",
+    "description": "Get a quick overview of your domain's size: number of users, aliases, administrators, groups, ActiveSync and MAPI/EWS mailboxes and mailing lists, with the domain's limits.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_alias",
+    "description": "Get the full configuration of one alias in your domain: targets, display name, GAL visibility, internal-only, sending permission and more.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Alias name (local part, e.g. 'sales') or full alias address",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_dkim",
+    "description": "Get your domain's DKIM signing configuration: whether signing is active, the selector and public key to publish in DNS, key size, canonicalization, signed header fields, and any pending rollover key with its DNS status. Private keys are never returned.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_event_catalog",
+    "description": "Get the event types an event hook can fire on (with their conditions, arguments and available actions) and, optionally, the variables usable in action text. Read this before creating an event hook. Large response.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "includeVariables": {
+          "description": "Also include the event variables (default true)",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_forward_blacklist",
+    "description": "Get the forwarding blacklist: addresses and domains that users in your domain may not auto-forward mail to.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_info",
+    "description": "Get basic information about your domain: name, hostname, enabled state, user/alias/list counts and limits, and disk usage.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_last_login_times",
+    "description": "Get the last login time of every user in your domain, with enabled and domain-admin flags. Useful for finding inactive accounts.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "referenceDate": {
+          "description": "Reference date in yyyy-MM-dd format that the server evaluates login times against (default: today)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_mailbox_forwarding",
+    "description": "Get where one user's incoming mail is forwarded: the forward-to addresses, whether a copy is kept, whether original recipients are kept, and how spam is handled.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part) or full email address in your domain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_mailing_list",
+    "description": "Get the full settings of one mailing list (posting permissions, digest, double opt-in, subject prefix, throttling, custom To/From/Reply-To, unsubscribe text, spam filtering, GAL visibility…) together with its counts of subscribers, digest subscribers, posters, banned users, custom fields and system messages. The posting password, if any, is redacted. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mailingListId"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_mailing_list_messages",
+    "description": "Get a mailing list's system message templates (welcome, goodbye, opt-in confirmation, error replies…): name, subject, body and last-modified date. Use the name with domain_update_mailing_list_message. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mailingListId"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_mailing_list_subscriber",
+    "description": "Get one subscriber's details across your domain's mailing lists: which lists and digests they are subscribed to, custom field values, bounce address, bounce count and history, and the log of list messages sent to them. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "emailAddress": {
+          "description": "The subscriber's email address",
+          "type": "string"
+        },
+        "mailingListId": {
+          "description": "Limit the details to one mailing list id (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "emailAddress"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_password_policy",
+    "description": "Get your domain's password policy: the server defaults and the domain's overrides (minimum length, required character classes, common-password and username checks, password history, expiration and grace period).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_permissions",
+    "description": "Get the feature permissions the system administrator has granted your domain (which settings and features the domain may use or override).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_security_settings",
+    "description": "Get your domain's sender and login security: the domain whitelist (addresses and domains that bypass spam filtering), the forwarding blocklist, login country restrictions, the IP access list, SMTP authentication / SSL / HSTS / TLS / SRS requirements, sending throttles and the external-sender warning settings.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_settings",
+    "description": "Get the full configuration of your domain (general settings, security options, catch-all, auto-clean, feature permissions). Large response. Password and secret values are redacted.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_signature_mappings",
+    "description": "Get which signature template applies to which user, alias, domain alias or the whole domain. type: 1 DomainAlias, 2 Domain, 3 Alias, 4 User, 5 SmtpAccount. mapOption: 0 None, 1 UsePrimary, 2 SignatureSpecified (signatureGuid), 3 UseDomainDefault.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_spam_settings",
+    "description": "Get your domain's spam filtering: whether the domain overrides the server defaults, the low/medium/high spam weight thresholds and the action taken at each level, the server defaults, and the relay/forward spam options.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_user",
+    "description": "Get the full account details of one user in your domain: settings, permissions, security flags, mailbox size and last login.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part, e.g. 'jane') or full email address in your domain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_user_connections",
+    "description": "Get who is connected in your domain: per-user connection counts, last login (overall and webmail), last authenticating IP and protocol, plus domain-wide counts per protocol (webmail, IMAP, POP, SMTP, ActiveSync, MAPI/EWS, XMPP, WebDAV).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "description": "Protocol filter: all (default), webmail, imap, pop, smtp, eas, mapiEws, xmpp or webdav",
+          "type": "string",
+          "default": "all"
+        },
+        "search": {
+          "description": "Search text matched against usernames (empty for all)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "skip": {
+          "description": "Number of users to skip (default 0)",
+          "type": "integer",
+          "default": 0
+        },
+        "take": {
+          "description": "Maximum users to return (default 100)",
+          "type": "integer",
+          "default": 100
+        }
+      }
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_user_defaults",
+    "description": "Get the default settings applied to NEW users created in your domain (mailbox size, protocol access, feature permissions, GAL visibility, password lock, auto-clean and more).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_user_group",
+    "description": "Get one user group in your domain by id: name, enabled state and member usernames.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "description": "User group id (from domain_list_user_groups)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "groupId"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_user_indexing_status",
+    "description": "Get the search-index status of one user's mailbox: whether it is indexing, items indexed and still to index, last indexed time and current status.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part) or full email address in your domain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_user_login_ips",
+    "description": "List the IP addresses a user in your domain has signed in from, with location and last-login time, grouped by protocol/category. Useful when investigating a compromised account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "The user: local part (e.g. 'jane') or full address",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_user_mail_settings",
+    "description": "Get one user's mail settings: can receive mail, forwarding enabled, ActiveSync / MAPI-EWS enabled, mailbox size limit, sending throttles, auto-clean rules, blocked and trusted senders, spam and calendar options.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part) or full email address in your domain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_get_user_statuses",
+    "description": "Get the account health of users in your domain: enabled, two-factor enabled, expired password, password-policy violations, indexing / migrating state, authentication type and critical errors. Paginated.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "description": "Search text matched against usernames (empty for all)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "skip": {
+          "description": "Number of results to skip (default 0)",
+          "type": "integer",
+          "default": 0
+        },
+        "take": {
+          "description": "Maximum results to return (default 100)",
+          "type": "integer",
+          "default": 100
+        }
+      }
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_aliases",
+    "description": "List the email aliases in your domain with their target addresses.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "description": "Optional search term to filter aliases",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_content_filters",
+    "description": "List the domain-level content filters, which apply to every user in your domain: id, title, order, enabled state, match type, conditions and actions (enum values are numeric; see domain_add_content_filter for the names).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_domain_aliases",
+    "description": "List the domain aliases of your domain: other domain names (e.g. example.net) whose mail is delivered to this domain's mailboxes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_event_hooks",
+    "description": "List event hooks (automated actions such as notifications that fire on mail events). By default lists the domain-level hooks; pass an owner to list one user's hooks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "description": "Owner username to filter by (optional; empty for the domain-level hooks)",
+          "type": "string",
+          "default": ""
+        },
+        "count": {
+          "description": "How many hooks to return (default 100)",
+          "type": "integer",
+          "default": 100
+        },
+        "startIndex": {
+          "description": "Index of the first hook to return, for paging (default 0)",
+          "type": "integer",
+          "default": 0
+        }
+      }
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_mailing_list_posters",
+    "description": "Search a mailing list's approved posters (addresses allowed to post) or its banned users (addresses that may neither post nor subscribe), with paging. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        },
+        "listType": {
+          "description": "Which list: 'approved' (default) for approved posters, or 'banned' for banned users",
+          "type": "string",
+          "default": "approved"
+        },
+        "search": {
+          "description": "Only return addresses containing this text (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "skip": {
+          "description": "Number of results to skip, for paging (default 0)",
+          "type": "integer",
+          "default": 0
+        },
+        "take": {
+          "description": "Maximum number of results to return (default 100)",
+          "type": "integer",
+          "default": 100
+        }
+      },
+      "required": [
+        "mailingListId"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_mailing_lists",
+    "description": "List the mailing lists in your domain: id, list address, description, moderator, status, posting permissions, digest/double opt-in flags and subscriber, digest, poster and banned-user counts. Use the id with the other mailing list tools. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_password_issues",
+    "description": "List users in your domain with password problems: 'noncompliant' (password breaks the current policy; shows which rules), 'expired' (must change before signing in) or 'aged' (approaching or past the maximum age). Paginated.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Which list: 'noncompliant', 'expired' or 'aged'",
+          "type": "string"
+        },
+        "search": {
+          "description": "Search text matched against usernames (empty for all)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "skip": {
+          "description": "Number of results to skip (default 0)",
+          "type": "integer",
+          "default": 0
+        },
+        "take": {
+          "description": "Maximum results to return (default 100)",
+          "type": "integer",
+          "default": 100
+        },
+        "excludeActiveDirectory": {
+          "description": "Leave out Active Directory-authenticated accounts, whose passwords SmarterMail does not manage (default false; ignored for 'expired')",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_protocol_mailboxes",
+    "description": "List the mailboxes in your domain that have ActiveSync or MAPI/EWS (Outlook) access enabled, with display name and last sync time. These are licensed per mailbox.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "description": "Which protocol: 'activesync' or 'mapiews'",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_shared_resources",
+    "description": "List the domain-level shared resources: shared calendars, conference rooms, equipment, address books, task and note lists, with their folderId, type, email alias, enabled state, booking window and who has access.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_signatures",
+    "description": "List the domain's email signature templates (id, guid, name, HTML text, isDefault) and whether a domain signature is in use.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_spam_checks",
+    "description": "List the DNS blocklists (RBL / URIBL) used for spam checking: name, lookup domain, whether each is enabled for incoming and outgoing SMTP, and how results are weighted.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_subscriber_fields",
+    "description": "List the custom subscriber fields defined for your domain's mailing lists: id, name and default value. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_user_groups",
+    "description": "List the user groups in your domain (id, name, enabled, member usernames). Pass a username to list only the groups that user belongs to.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Optional username (local part) or email address: only return this user's groups",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_list_users",
+    "description": "List the users in your domain with username, email address, full name, disabled state, domain-admin flag, mailbox size and last login.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "description": "Optional case-insensitive filter matched against username, email address and full name",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_move_content_filter",
+    "description": "Move a domain-level content filter one place up (evaluated earlier) or down in the processing order.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Filter id",
+          "type": "integer"
+        },
+        "up": {
+          "description": "true: move up (higher priority); false: move down",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "up"
+      ]
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_recalculate_mailbox_sizes",
+    "description": "Recount the disk usage of one or more mailboxes in your domain, for when the reported size is out of sync with what is actually stored.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "usernames": {
+          "description": "Usernames (local parts) or email addresses in your domain",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "usernames"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_reindex_users",
+    "description": "Rebuild the search index of one or more mailboxes in your domain. Use when search results are missing or wrong. Runs in the background and can take a while for large mailboxes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "usernames": {
+          "description": "Usernames (local parts) or email addresses in your domain",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "usernames"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_remove_mailing_list_posters",
+    "description": "Remove email addresses from a mailing list's approved posters or from its banned users. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        },
+        "emailAddresses": {
+          "description": "Email addresses to remove",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "listType": {
+          "description": "Which list: 'approved' (default) for approved posters, or 'banned' for banned users",
+          "type": "string",
+          "default": "approved"
+        }
+      },
+      "required": [
+        "mailingListId",
+        "emailAddresses"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_remove_mailing_list_subscribers",
+    "description": "Unsubscribe one or more email addresses from a mailing list (regular or digest subscribers). Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        },
+        "emailAddresses": {
+          "description": "Email addresses to remove",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "digest": {
+          "description": "True to remove them from the digest subscribers instead of the regular subscribers (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "mailingListId",
+        "emailAddresses"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_rename_domain_alias",
+    "description": "Rename a domain alias (e.g. example.net → example.org). Optionally require the new name's MX records to point here first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "oldName": {
+          "description": "Current domain alias name",
+          "type": "string"
+        },
+        "newName": {
+          "description": "New domain alias name",
+          "type": "string"
+        },
+        "verifyMx": {
+          "description": "Refuse unless the new name's MX records point at this server (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "oldName",
+        "newName"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_rename_user",
+    "description": "Change a user's username (and so their email address) in your domain. Mail, settings and folders are kept. The old address stops working unless you add an alias for it. You cannot rename yourself with this tool.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Current username (local part) or email address",
+          "type": "string"
+        },
+        "newUsername": {
+          "description": "New username (local part only, e.g. 'jane.doe')",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "newUsername"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_resync_user_devices",
+    "description": "Force the connected devices (ActiveSync and other sync clients) of one or more users in your domain to resynchronise. Use to fix devices that stopped syncing.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "usernames": {
+          "description": "Usernames (local parts) or email addresses in your domain",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "usernames"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_save_event_hook",
+    "description": "Create an event hook, or replace an existing one, from a full event-hook JSON object (name, enabled, eventID/eventGroup, conditions[], actions[] with inputs[]; the shape domain_list_event_hooks returns). Get valid events, conditions and actions from domain_get_event_catalog. To edit a hook, read it, change it, and pass it back with its id and isNew:false.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "eventHookJson": {
+          "description": "The event hook as a JSON object string",
+          "type": "string"
+        }
+      },
+      "required": [
+        "eventHookJson"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_save_subscriber_field",
+    "description": "Create a custom subscriber field for your domain's mailing lists, or rename one / change its default value. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Field name, e.g. 'FirstName'",
+          "type": "string"
+        },
+        "defaultValue": {
+          "description": "Default value for subscribers who have none (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "fieldId": {
+          "description": "Id of an existing field to change (from domain_list_subscriber_fields); omit to create a new field",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_search_accounts",
+    "description": "Search the users and aliases of your domain together, with status (enabled / disabled / errored), account type, authentication type and ActiveSync / MAPI-EWS flags. Paginated.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "description": "Search text matched against account names (empty for all)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "skip": {
+          "description": "Number of results to skip (default 0)",
+          "type": "integer",
+          "default": 0
+        },
+        "take": {
+          "description": "Maximum results to return (default 100)",
+          "type": "integer",
+          "default": 100
+        },
+        "sortField": {
+          "description": "Field to sort by, e.g. 'userName' or 'displayName' (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "sortDescending": {
+          "description": "Sort descending (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_search_mailing_list_subscribers",
+    "description": "Search the subscribers of a mailing list, with paging. Returns the total match count and the page of subscribers (address, bounce count, last edit). Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        },
+        "search": {
+          "description": "Only return subscribers whose address contains this text (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "subscriberType": {
+          "description": "Which subscribers: 'regular' (default), 'digest', or 'all'",
+          "type": "string",
+          "default": "regular"
+        },
+        "sortField": {
+          "description": "Sort by 'emailaddress' (default), 'editedon' or 'bouncecount'",
+          "type": "string",
+          "default": "emailaddress"
+        },
+        "sortDescending": {
+          "description": "True to sort descending (default false)",
+          "type": "boolean",
+          "default": false
+        },
+        "skip": {
+          "description": "Number of results to skip, for paging (default 0)",
+          "type": "integer",
+          "default": 0
+        },
+        "take": {
+          "description": "Maximum number of results to return (default 100)",
+          "type": "integer",
+          "default": 100
+        }
+      },
+      "required": [
+        "mailingListId"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_send_mailing_list_digest",
+    "description": "Send a mailing list's pending digest right now, emailing every digest subscriber, instead of waiting for its schedule. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mailingListId"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_set_catch_all",
+    "description": "Set the catch-all: the alias that receives mail sent to any address in your domain that does not exist. Pass an empty value to turn the catch-all off.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "aliasName": {
+          "description": "Existing alias name (local part) to use as the catch-all, or empty to disable",
+          "type": "string"
+        }
+      },
+      "required": [
+        "aliasName"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_set_event_hook_enabled",
+    "description": "Turn an existing event hook on or off without changing anything else about it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Event hook id (from domain_list_event_hooks)",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "true to enable, false to disable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "enabled"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_set_mailbox_forwarding",
+    "description": "Set where one user's incoming mail is forwarded. Only what you pass is changed. Pass an empty forwardTo list to stop forwarding. The user's mail settings must also allow forwarding (enableMailForwarding, see domain_update_user_mail_settings).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part) or full email address in your domain",
+          "type": "string"
+        },
+        "forwardTo": {
+          "description": "COMPLETE list of addresses to forward to, replacing the current list (optional; empty list stops forwarding)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "deleteOnForward": {
+          "description": "True to delete the message from this mailbox after forwarding; false keeps a copy (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "keepRecipients": {
+          "description": "True to keep the original recipients on the forwarded message (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "spamForwardOption": {
+          "description": "How spam is treated when forwarding, as SmarterMail names it (see domain_get_mailbox_forwarding for the current value) (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_set_protocol_access",
+    "description": "Turn protocols on or off for one or more users in your domain. Only the protocols you pass are changed. ActiveSync and MAPI/EWS are licensed per mailbox and count against the domain's limits.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "usernames": {
+          "description": "Usernames (local parts) or email addresses in your domain",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "webmail": {
+          "description": "Webmail access (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "smtp": {
+          "description": "SMTP (sending from mail clients) (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "imap": {
+          "description": "IMAP (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "pop": {
+          "description": "POP (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "xmpp": {
+          "description": "XMPP chat (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "webdav": {
+          "description": "WebDAV (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "activeSync": {
+          "description": "Exchange ActiveSync (mobile devices) (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "mapiEws": {
+          "description": "MAPI/EWS (Outlook / Exchange clients) (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "usernames"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_set_signature_mapping",
+    "description": "Assign a signature to a user, alias, domain alias or the whole domain, or remove such an assignment. Other mappings are kept.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "targetType": {
+          "description": "What the mapping is for: 'user', 'alias', 'domain_alias', 'domain' or 'smtp_account'",
+          "type": "string"
+        },
+        "target": {
+          "description": "The target's name: a username/local part for user or alias, a domain name for domain_alias or domain",
+          "type": "string"
+        },
+        "option": {
+          "description": "'specified' (use signatureGuid), 'domain_default', 'primary', 'none', or 'remove' to delete this mapping",
+          "type": "string"
+        },
+        "signatureGuid": {
+          "description": "Signature guid from domain_list_signatures (required when option is 'specified')",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "allowUsersToOverride": {
+          "description": "Let the user override this signature (default true)",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "targetType",
+        "target",
+        "option"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_set_user_group_membership",
+    "description": "Add one user to, and/or remove them from, user groups in your domain.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part) or email address in your domain",
+          "type": "string"
+        },
+        "addToGroupIds": {
+          "description": "Group ids to add the user to (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "removeFromGroupIds": {
+          "description": "Group ids to remove the user from (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_test_dkim_dns",
+    "description": "Check whether a DKIM public key is correctly published in DNS. Only performs a DNS lookup; changes nothing. By default tests the active key; set which='pending' to test the rollover key, or pass selector and publicKey to test any key.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "which": {
+          "description": "Which of the domain's keys to test: 'active' (default) or 'pending'. Ignored when selector and publicKey are given.",
+          "type": "string",
+          "default": "active"
+        },
+        "selector": {
+          "description": "DKIM selector to test (optional; must be given together with publicKey)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "publicKey": {
+          "description": "Public key to look for in DNS (optional; must be given together with selector)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_alias",
+    "description": "Update an existing alias in your domain. Only the fields you pass are changed. Passing targets replaces the whole target list.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Current alias name (local part, e.g. 'sales')",
+          "type": "string"
+        },
+        "newName": {
+          "description": "New alias name to rename it (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "targets": {
+          "description": "Replacement list of target addresses (optional; replaces the existing list)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "displayName": {
+          "description": "New display name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "description": "New description (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "internalOnly": {
+          "description": "Only accept mail from inside the domain (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "allowSending": {
+          "description": "Let target users send mail as this alias (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "hideFromGAL": {
+          "description": "Hide the alias from the Global Address List (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "isEnabled": {
+          "description": "Enable (true) or disable (false) the alias; a disabled alias bounces mail (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_content_filter",
+    "description": "Change a domain-level content filter. Only what you pass changes; conditions and actions, when given, replace the filter's whole list (same format as domain_add_content_filter). Use domain_list_content_filters to find the id.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Filter id",
+          "type": "integer"
+        },
+        "title": {
+          "description": "New name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "enabled": {
+          "description": "Enable or disable the filter (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "matchType": {
+          "description": "'And' or 'Or' (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "conditions": {
+          "description": "Replacement JSON array of conditions (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "actions": {
+          "description": "Replacement JSON array of actions (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_dkim_settings",
+    "description": "Change how your domain signs mail with DKIM (does not change the key). Only the options you pass change; the rest keep their current values.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "canonicalizationBody": {
+          "description": "Body canonicalization: 'simple' or 'relaxed' (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "canonicalizationHeader": {
+          "description": "Header canonicalization: 'simple' or 'relaxed' (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "fieldOption": {
+          "description": "How 'fields' is used: 'include' (sign only these headers) or 'exclude' (sign all but these) (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "fields": {
+          "description": "Header field names to include/exclude from signing, e.g. ['From','To','Subject','Date'] (optional; replaces the current list)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "maxMessageSign": {
+          "description": "Messages larger than this many bytes are not signed (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_mailing_list",
+    "description": "Change a mailing list's settings. Only the fields you pass are changed; everything else is kept. For settings without their own parameter, pass them in settingsJson using the field names domain_get_mailing_list returns. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        },
+        "moderatorAddress": {
+          "description": "New moderator email address (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "description": "New description (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "postingPermissions": {
+          "description": "Who may post: 'anyone', 'subscribers' or 'moderator' (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "enableDigest": {
+          "description": "Enable (true) or disable (false) digest delivery (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "doubleOptIn": {
+          "description": "Require (true) or stop requiring (false) double opt-in (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "disableSubscriptions": {
+          "description": "Stop (true) or allow (false) new subscriptions (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "subjectPrefix": {
+          "description": "Subject prefix text (optional; an empty string turns the prefix off)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "showInGal": {
+          "description": "Show (true) or hide (false) the list in the Global Address List (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "disabled": {
+          "description": "Disable (true) or re-enable (false) the whole list (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "settingsJson": {
+          "description": "Other settings as a JSON object string, e.g. {\"listReplyToAddress\":\"help@example.com\",\"maxMessagesSentPerHour\":500} (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "mailingListId"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_mailing_list_message",
+    "description": "Change one of a mailing list's system message templates (see domain_get_mailing_list_messages for the names). Some messages have no subject; leave subject out for those. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mailingListId": {
+          "description": "Mailing list id (from domain_list_mailing_lists)",
+          "type": "integer"
+        },
+        "name": {
+          "description": "Template name exactly as domain_get_mailing_list_messages returns it",
+          "type": "string"
+        },
+        "body": {
+          "description": "New message body",
+          "type": "string"
+        },
+        "subject": {
+          "description": "New subject (optional; only for messages that have one)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "mailingListId",
+        "name",
+        "body"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_mailing_list_subscriber",
+    "description": "Change one subscriber: set custom field values, and/or replace which of your domain's lists and digests they are subscribed to. Only what you pass is changed. Requires a domain admin account.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "emailAddress": {
+          "description": "The subscriber's email address",
+          "type": "string"
+        },
+        "fieldValuesJson": {
+          "description": "Custom field values as a JSON object string of field name → value, e.g. {\"FirstName\":\"Jane\"} (optional; other fields are kept)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "subscribedListIds": {
+          "description": "The complete set of mailing list ids they should be subscribed to (optional; replaces the current set)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          },
+          "default": null
+        },
+        "subscribedDigestIds": {
+          "description": "The complete set of mailing list ids they should receive digests from (optional; replaces the current set)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          },
+          "default": null
+        }
+      },
+      "required": [
+        "emailAddress"
+      ]
+    },
+    "category": "Mailing lists",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_password_policy",
+    "description": "Change your domain's password policy. Only the rules you pass are changed; everything else is kept. Stricter rules affect existing users at their next password change and show up in domain_list_password_issues.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "minLength": {
+          "description": "Minimum password length; 0 turns the length rule off (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "requireCapital": {
+          "description": "Require an uppercase letter (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "requireLower": {
+          "description": "Require a lowercase letter (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "requireNumber": {
+          "description": "Require a number (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "requireSymbol": {
+          "description": "Require a symbol (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "notUsername": {
+          "description": "Refuse passwords that contain the username (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "preventCommonPasswords": {
+          "description": "Refuse common, easily guessed passwords (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "passwordHistoryCount": {
+          "description": "Number of previous passwords that may not be reused; 0 turns the history rule off (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "expirationMonths": {
+          "description": "Password expiration in months; 0 turns expiration off (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "expirationGraceDays": {
+          "description": "Grace period in days after expiry before outgoing SMTP is blocked (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_settings",
+    "description": "Change domain settings. Pass a JSON object of only the settings to change, using the property names domain_get_settings returns (e.g. {\"enableMailForwarding\":false} or {\"externalSenderOverrideSettings\":{\"enabled\":true}}). Nested objects are merged, arrays and plain values replace. Everything you do not mention is kept. Unknown names are refused.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "settingsJson": {
+          "description": "JSON object string of the settings to change",
+          "type": "string"
+        }
+      },
+      "required": [
+        "settingsJson"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_shared_resource",
+    "description": "Rename a domain shared resource and/or change who can access it. For access, the users you list get the given level; pass removeUsers to take access away. Group access and anyone not mentioned are kept.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "folderId from domain_list_shared_resources",
+          "type": "integer"
+        },
+        "newName": {
+          "description": "New display name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "users": {
+          "description": "Usernames to grant or change access for (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "userAccess": {
+          "description": "Access level for those users: 'availability', 'read', 'manage' or 'owner' (default 'read')",
+          "type": "string",
+          "default": "read"
+        },
+        "removeUsers": {
+          "description": "Usernames whose access to remove (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "bookingWindow": {
+          "description": "New booking window: 'three_months', 'six_months', 'one_year', 'two_years' or 'no_limit' (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_signature",
+    "description": "Change a domain signature template's name, text or default flag. Only the fields you pass change.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Signature id (from domain_list_signatures)",
+          "type": "integer"
+        },
+        "name": {
+          "description": "New name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "text": {
+          "description": "New body, HTML allowed (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "isDefault": {
+          "description": "Set or clear the default flag (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_spam_settings",
+    "description": "Change your domain's spam thresholds and actions. Only the values you pass change. Changing weights or actions turns on the domain override of the server defaults unless overrideActive=false is passed. The server administrator may not allow domains to override spam actions. Actions: NoAction, Delete, Bounce, MoveToFolder (argument = folder name), AddHeader (argument = header line), PrefixSubject (argument = prefix text), Forward (argument = address), Read, SetPriority, FollowUp.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "overrideActive": {
+          "description": "true: use this domain's own spam settings; false: fall back to the server defaults (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "lowWeight": {
+          "description": "Spam weight at which a message counts as low-probability spam (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "lowAction": {
+          "description": "Action for low-probability spam (optional), e.g. 'PrefixSubject'",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "lowActionArgument": {
+          "description": "Argument for lowAction, e.g. the subject prefix or folder name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "mediumWeight": {
+          "description": "Spam weight for medium-probability spam (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "mediumAction": {
+          "description": "Action for medium-probability spam (optional), e.g. 'MoveToFolder'",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "mediumActionArgument": {
+          "description": "Argument for mediumAction (optional), e.g. 'Junk E-Mail'",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "highWeight": {
+          "description": "Spam weight for high-probability spam (optional)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "highAction": {
+          "description": "Action for high-probability spam (optional), e.g. 'Delete'",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "highActionArgument": {
+          "description": "Argument for highAction (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_user",
+    "description": "Update an existing user in your domain. Only the fields you pass are changed; everything else is kept.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part) or full email address of the user to change",
+          "type": "string"
+        },
+        "fullName": {
+          "description": "New full display name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "password": {
+          "description": "New password (optional); must meet the domain's password requirements",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "maxMailboxSizeMb": {
+          "description": "New maximum mailbox size in MB (optional; 0 means no limit)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null
+        },
+        "isDomainAdmin": {
+          "description": "Grant (true) or revoke (false) domain administrator rights (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "description": "New account description (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "username"
+      ]
+    },
+    "category": "Domain",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_user_defaults",
+    "description": "Change the default settings for NEW users in your domain (see domain_get_user_defaults for the field names), e.g. {\"hideFromGal\":true}. Only the fields you pass are changed. Existing users are not affected.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "settingsJson": {
+          "description": "JSON object with the defaults to change, using the field names inside 'settings' from domain_get_user_defaults",
+          "type": "string"
+        }
+      },
+      "required": [
+        "settingsJson"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_user_group",
+    "description": "Rename, enable/disable, or replace the member list of a user group in your domain. Only what you pass is changed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "description": "User group id (from domain_list_user_groups)",
+          "type": "string"
+        },
+        "name": {
+          "description": "New group name (optional)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "members": {
+          "description": "New COMPLETE member list, replacing the current one: usernames (local parts) or email addresses (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "enabled": {
+          "description": "Enable (true) or disable (false) the group (optional)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "groupId"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_user_mail_settings",
+    "description": "Change one user's mail settings (see domain_get_user_mail_settings for the field names), e.g. {\"canReceiveMail\":false}, {\"maxSize\":0}, {\"throttleSettings\":{\"messagesPerHour\":500}} or {\"blockedSenders\":[\"spam@example.com\"]}. The fields you pass are merged into the current settings; lists you pass replace the current list.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "description": "Username (local part) or full email address in your domain",
+          "type": "string"
+        },
+        "settingsJson": {
+          "description": "JSON object with the settings to change, using the field names from domain_get_user_mail_settings",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "settingsJson"
+      ]
+    },
+    "category": "Domain users",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_update_whitelist",
+    "description": "Change the domain whitelist: senders (email addresses) and sending domains that bypass spam filtering for every user in your domain. mode 'add' (default) and 'remove' edit the current list; 'replace' sets it to exactly what you pass. Whitelisting a sender lets its spam through, so add only senders you trust.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "emails": {
+          "description": "Email addresses, e.g. ['alerts@vendor.com'] (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "domains": {
+          "description": "Domains, e.g. ['vendor.com'] (optional)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": null
+        },
+        "mode": {
+          "description": "'add' (default), 'remove', or 'replace'",
+          "type": "string",
+          "default": "add"
+        }
+      }
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "domain_verify_dkim",
+    "description": "Have SmarterMail validate a DKIM key against DNS and update its status. rollover=false checks the active key; rollover=true checks the pending rollover key and, if DNS matches, makes it the active signing key. Can change which key signs mail. For a lookup that changes nothing, use domain_test_dkim_dns.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "rollover": {
+          "description": "false (default): verify the active key. true: verify the pending rollover key and activate it on success.",
+          "type": "boolean",
+          "default": false
+        },
+        "forceActivation": {
+          "description": "Rollover only: activate the pending key even if DNS validation fails (default false)",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "category": "Domain security",
+    "scope": "DomainAdmin",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "domain_verify_domain_alias_mx",
+    "description": "Check that a domain alias's MX records point at this mail server. Only checks DNS; changes nothing. Use after adding a domain alias.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "aliasName": {
+          "description": "The domain alias name, e.g. 'example.net'",
+          "type": "string"
+        }
+      },
+      "required": [
+        "aliasName"
+      ]
+    },
+    "category": "Domain routing",
+    "scope": "DomainAdmin",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "download_email_attachment",
+    "description": "Fetch an email attachment (filenames from get_email_attachments). Text attachments come back as text; binary ones as base64 when includeBase64=true (up to 5 MB). On a local server that shares your filesystem, savePath writes the file there instead.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the email is located",
+          "type": "string"
+        },
+        "filename": {
+          "description": "The filename of the attachment to download (from get_email_attachments)",
+          "type": "string"
+        },
+        "savePath": {
+          "description": "Optional: save to this path on the MCP server's filesystem (a directory gets the attachment's filename). Only works on a local server that shares your filesystem.",
+          "type": "string",
+          "default": ""
+        },
+        "includeBase64": {
+          "description": "Return a binary attachment's bytes as base64Content (up to 5 MB). Text attachments are always returned as text.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "filename"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "expand_contact_group",
+    "description": "Expand a contact group to get all member email addresses (including nested groups)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "description": "The ID of the contact group to expand",
+          "type": "string"
+        },
+        "ignoreSubgroups": {
+          "description": "Set to true to ignore nested groups and only return direct members",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "groupId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "forward_email",
+    "description": "Forward an email message to other recipients",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email to forward",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the original email is located",
+          "type": "string"
+        },
+        "to": {
+          "description": "The email addresses to forward to, comma separated",
+          "type": "string"
+        },
+        "message": {
+          "description": "Optional message to include above the forwarded content",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "to"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "get_calendar_event",
+    "description": "Get a calendar event for a given folder ID and event ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The folder ID to get the calendar event for",
+          "type": "string"
+        },
+        "eventId": {
+          "description": "The event ID to get the calendar event for",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "eventId"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_calendar_events",
+    "description": "Get calendar events for a given folder ID and date range",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The folder ID to get calendar events for",
+          "type": "string"
+        },
+        "startDate": {
+          "description": "Start date in ISO 8601 format",
+          "type": "string"
+        },
+        "endDate": {
+          "description": "End date in ISO 8601 format",
+          "type": "string"
+        },
+        "searchQuery": {
+          "description": "Filter events by searching various fields (optional)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "startDate",
+        "endDate",
+        "searchQuery"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_contact",
+    "description": "Get full details for a specific contact by ID and source ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "contactId": {
+          "description": "The ID of the contact to retrieve",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "contactId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_contact_group",
+    "description": "Get details of a specific contact group including all members",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "groupId": {
+          "description": "The ID of the contact group to retrieve",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "groupId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_contact_groups",
+    "description": "Get all contact groups from a specific folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_contacts",
+    "description": "Get contacts sorted by most recently contacted",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "searchQuery": {
+          "description": "The search query to filter contacts by",
+          "type": "string"
+        },
+        "maxResults": {
+          "description": "The maximum number of results to return",
+          "type": "integer"
+        },
+        "startIndex": {
+          "description": "The index to start from",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "folderId",
+        "searchQuery",
+        "maxResults",
+        "startIndex"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_content_filters",
+    "description": "Get all content filters (inbox rules). Returns filter groups with their conditions and actions.\n\nCondition Field Types: 0=FromAddress, 1=FromDomain, 3=WordsInSubject, 4=WordsInBody, 7=WordsInTo, 10=ToAddress, 16=HasAttachments, 17=AttachmentFilename\nComparison Types: 0=Equals, 1=DoesntEqual, 2=Contains, 3=DoesntContain\nAction Types: 1=Delete, 4=MoveToFolder, 5=AddHeader, 6=PrefixSubject, 7=Forward, 8=MarkAsRead\nMatch Types: 0=And (all conditions), 1=Or (any condition)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_email_attachments",
+    "description": "List an email's attachments: filename, contentType (from the file name), approximate size (SmarterMail rounds to KB) and the content IDs of images embedded inline in the body. Read a text attachment with read_email_part; download_email_attachment fetches any of them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the email is located",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uid",
+        "folderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_email_message",
+    "description": "Get a specific email message by UID and folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email to retrieve",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder path where the email is located",
+          "type": "string"
+        },
+        "includeBody": {
+          "description": "Whether to include the message body in the response",
+          "type": "boolean"
+        },
+        "includeHeader": {
+          "description": "Whether to include the message headers in the response",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "includeBody",
+        "includeHeader"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_emails",
+    "description": "Get email metadata like subject, from, date, id, read, flagged, etc. from a specific folder with optional search and pagination",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The folderID to get emails from (accepts <username>/<folderPath> as well, ex: jdoe/Inbox or jdoe/<folderid>)",
+          "type": "string"
+        },
+        "skip": {
+          "description": "The number of emails to skip (for pagination).",
+          "type": "integer",
+          "default": 0
+        },
+        "take": {
+          "description": "The maximum number of emails to return.",
+          "type": "integer",
+          "default": 50
+        },
+        "query": {
+          "description": "Optional search query to filter emails. Supports flags in query:\n                - is:(un)read/is:(un)flagged/is:(un)replied/is:attachment - filter by status\n                - Can combine multiple filters with spaces and optional search query (ex: \"is:attachment is:unread searchterm\")",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_global_address_book",
+    "description": "Get contacts from the global address book",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_note",
+    "description": "Get a single note's full information by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "noteId": {
+          "description": "The ID of the note to retrieve",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "noteId",
+        "folderId"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_notes",
+    "description": "Get notes from a specific note source",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_task_details",
+    "description": "Get details for a specific task",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the task source",
+          "type": "string"
+        },
+        "taskId": {
+          "description": "The ID of the task to retrieve",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "taskId"
+      ]
+    },
+    "category": "Tasks",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_tasks",
+    "description": "Get all tasks from a specific task folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the task source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId"
+      ]
+    },
+    "category": "Tasks",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "get_user_data",
+    "description": "Get user data",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "list_folder_info_by_type",
+    "description": "List folder information of folders by type",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The type of folders to list: 1=email, 2=calendars/tasks, 3=contacts, 4=notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "category": "Folders",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "move_emails",
+    "description": "Move emails to a different folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UIDs of the emails to move, comma separated",
+          "type": "string"
+        },
+        "srcFolderId": {
+          "description": "The folder the emails are in",
+          "type": "string"
+        },
+        "destFolderId": {
+          "description": "The folder to move the emails to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uid",
+        "srcFolderId",
+        "destFolderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "new_or_update_calendar_event",
+    "description": "Create a new calendar event or update an existing one",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the calendar folder to add/update the event to",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The title of the event",
+          "type": "string"
+        },
+        "startTime": {
+          "description": "The start time of the event (YYYY-MM-DDTHH:mm:ss)",
+          "type": "string"
+        },
+        "endTime": {
+          "description": "The end time of the event (YYYY-MM-DDTHH:mm:ss)",
+          "type": "string"
+        },
+        "eventId": {
+          "description": "The ID of the event to update (if it exists)",
+          "type": "string"
+        },
+        "location": {
+          "description": "The location of the event",
+          "type": "string"
+        },
+        "description": {
+          "description": "The description of the event",
+          "type": "string"
+        },
+        "attendees": {
+          "description": "Comma separated list of email addresses of attendees",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderId",
+        "subject",
+        "startTime",
+        "endTime",
+        "eventId",
+        "location",
+        "description",
+        "attendees"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "new_or_update_task",
+    "description": "Create a new task or update an existing one",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "subject": {
+          "description": "The subject of the task",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID of the task source (if null, primary source will be used)",
+          "type": "string"
+        },
+        "taskId": {
+          "description": "The ID of the task to update (if it exists)",
+          "type": "string"
+        },
+        "description": {
+          "description": "The description of the task",
+          "type": "string"
+        },
+        "percentComplete": {
+          "description": "The percentage of the task that is complete (0-100)",
+          "type": "integer"
+        },
+        "start": {
+          "description": "The start date of the task (YYYY-MM-DD HH:mm)",
+          "type": "string"
+        },
+        "due": {
+          "description": "The due date of the task (YYYY-MM-DD HH:mm)",
+          "type": "string"
+        },
+        "reminder": {
+          "description": "The reminder date of the task (YYYY-MM-DD HH:mm)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "folderId",
+        "taskId",
+        "description",
+        "percentComplete",
+        "start",
+        "due",
+        "reminder"
+      ]
+    },
+    "category": "Tasks",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "read_email_part",
+    "description": "Inventory, window, or grep any part of an email. Omit part for an inventory of html/plain/text/headers/attachments with sizes. Set part (html, plain, text derived from HTML, headers, or attachment:<filename>) to read a window with offset/limit. Set pattern to grep (literal by default; isRegex=true for regex). Window responses include totalChars, nextOffset, and hasMore so you can page through large bodies.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder ID or path where the email is located",
+          "type": "string"
+        },
+        "part": {
+          "description": "Part to read: html, plain, text (HTML converted to plaintext), headers, or attachment:<filename>. Omit or leave empty for inventory.",
+          "type": "string",
+          "default": ""
+        },
+        "pattern": {
+          "description": "Search pattern. When set, switches to grep mode instead of a windowed read.",
+          "type": "string",
+          "default": ""
+        },
+        "isRegex": {
+          "description": "Treat pattern as a regular expression. Default false (literal substring).",
+          "type": "boolean",
+          "default": false
+        },
+        "ignoreCase": {
+          "description": "Case-insensitive match. Default true.",
+          "type": "boolean",
+          "default": true
+        },
+        "offset": {
+          "description": "Window start offset in characters. Default 0.",
+          "type": "integer",
+          "default": 0
+        },
+        "limit": {
+          "description": "Window size in characters. Default 8000. 0 means through the end, still capped at 200000.",
+          "type": "integer",
+          "default": 8000
+        },
+        "contextChars": {
+          "description": "Characters of context around each grep match. Default 300.",
+          "type": "integer",
+          "default": 300
+        },
+        "maxMatches": {
+          "description": "Maximum grep matches to return. Default 20.",
+          "type": "integer",
+          "default": 20
+        }
+      },
+      "required": [
+        "uid",
+        "folderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "remove_emails",
+    "description": "Remove emails from the system",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UIDs of the emails to remove, comma separated",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The folder the emails are in",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uid",
+        "folderId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "remove_folder",
+    "description": "Remove folders for the user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderIds": {
+          "description": "The id's of the folders to remove, in the format 'owner/numeric_id'. Child folders are also removed. (comma separated)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "folderIds"
+      ]
+    },
+    "category": "Folders",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "remove_items",
+    "description": "Remove items from the system (notes, tasks, contacts, events)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "itemId": {
+          "description": "The IDs of the items to remove, comma separated (id/guid only)",
+          "type": "string"
+        },
+        "itemType": {
+          "description": "The type of the item to remove - note, task, contact, event",
+          "type": "string"
+        },
+        "calendarId": {
+          "description": "The ID of the calendar to remove the event from (required for events)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "itemId",
+        "itemType",
+        "calendarId"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "reply_to_email",
+    "description": "Reply to an email message",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UID of the email to reply to",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the original email is located",
+          "type": "string"
+        },
+        "body": {
+          "description": "The reply message body (HTML supported)",
+          "type": "string"
+        },
+        "replyAll": {
+          "description": "Set to true to reply to all recipients, false to reply only to sender",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "body"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "respond_to_meeting",
+    "description": "Respond to a meeting invitation (accept, decline, or tentative)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the calendar folder containing the meeting",
+          "type": "string"
+        },
+        "eventId": {
+          "description": "The event ID of the meeting",
+          "type": "string"
+        },
+        "response": {
+          "description": "Response type: 'accept', 'decline', or 'tentative'",
+          "type": "string"
+        },
+        "comment": {
+          "description": "Optional comment to include with your response",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "folderId",
+        "eventId",
+        "response"
+      ]
+    },
+    "category": "Calendar",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "run_content_filters",
+    "description": "Run content filters against a folder to process existing emails",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folder": {
+          "description": "Folder path to run filters on (e.g., 'Inbox')",
+          "type": "string"
+        },
+        "filterIds": {
+          "description": "Optional: comma-separated filter IDs to run. If empty, runs all enabled filters.",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "folder"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "search_items",
+    "description": "Search for items in the system (mail, notes, tasks, contacts, events)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "section": {
+          "description": "The area to search in: Everywhere, Email, Notes, Contacts, Calendar, Tasks",
+          "type": "string"
+        },
+        "searchQuery": {
+          "description": "The search query string",
+          "type": "string"
+        },
+        "or": {
+          "description": "Use OR logic for multiple search terms (default: false for AND logic)",
+          "type": "boolean",
+          "default": false
+        },
+        "maxEmailsToReturn": {
+          "description": "Maximum number of email results to return (default: 250)",
+          "type": "integer",
+          "default": 250
+        }
+      },
+      "required": [
+        "section",
+        "searchQuery"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": false,
+    "destructive": false
+  },
+  {
+    "name": "send_draft",
+    "description": "Send a previously saved draft email",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "draftUid": {
+          "description": "The UID of the draft to send",
+          "type": "integer"
+        },
+        "folderId": {
+          "description": "The folder where the draft is located (usually 'Drafts')",
+          "type": "string",
+          "default": "Drafts"
+        }
+      },
+      "required": [
+        "draftUid"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "send_email",
+    "description": "Send a simple email",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "description": "The email addresses to send the email to, separated by commas",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The subject of the email",
+          "type": "string"
+        },
+        "body": {
+          "description": "The body of the email",
+          "type": "string"
+        },
+        "cc": {
+          "description": "The email address to cc",
+          "type": "string"
+        },
+        "bcc": {
+          "description": "The email address to bcc",
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "subject",
+        "body",
+        "cc",
+        "bcc"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "send_email_with_attachments",
+    "description": "Send an email with previously uploaded attachments. Use upload_attachment first, then pass its attachmentGuid here. Inline images uploaded with inline=true are shown where the body has <img src=\"cid:...\"> with their htmlReference.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "description": "The email addresses to send the email to, separated by commas",
+          "type": "string"
+        },
+        "subject": {
+          "description": "The subject of the email",
+          "type": "string"
+        },
+        "body": {
+          "description": "The body of the email (HTML supported; reference inline images as <img src=\"cid:...\">)",
+          "type": "string"
+        },
+        "attachmentGuid": {
+          "description": "The attachmentGuid returned by upload_attachment",
+          "type": "string"
+        },
+        "cc": {
+          "description": "The email address to cc",
+          "type": "string",
+          "default": ""
+        },
+        "bcc": {
+          "description": "The email address to bcc",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "to",
+        "subject",
+        "body",
+        "attachmentGuid"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "set_email_properties",
+    "description": "Mark emails as read/unread, flagged/unflagged, or add tags",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "description": "The UIDs of the emails to mark, comma separated",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The folder the emails are in",
+          "type": "string"
+        },
+        "read": {
+          "description": "Whether to mark the emails as read or unread",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "flagged": {
+          "description": "Whether to mark the emails as flagged or unflagged",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tags": {
+          "description": "The tags to add to the emails, comma separated",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uid",
+        "folderId",
+        "read",
+        "flagged",
+        "tags"
+      ]
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "set_trusted_senders",
+    "description": "Set trusted senders (whitelist) to bypass spam filtering. Accepts email addresses and/or domains.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "emails": {
+          "description": "Comma-separated trusted email addresses (e.g., 'friend@example.com, colleague@work.com')",
+          "type": "string",
+          "default": ""
+        },
+        "domains": {
+          "description": "Comma-separated trusted domains (e.g., 'trusted.com, company.org')",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": true
+  },
+  {
+    "name": "unblock_senders",
+    "description": "Unblock previously blocked senders. Accepts email addresses or domains.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "senders": {
+          "description": "Comma-separated email addresses or domains to unblock",
+          "type": "string"
+        }
+      },
+      "required": [
+        "senders"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_contact",
+    "description": "Update an existing contact in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "contactId": {
+          "description": "The ID of the contact to update",
+          "type": "string"
+        },
+        "firstName": {
+          "description": "First name of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "lastName": {
+          "description": "Last name of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "email": {
+          "description": "Email address of the contact",
+          "type": "string",
+          "default": ""
+        },
+        "displayAs": {
+          "description": "Display name for the contact",
+          "type": "string",
+          "default": ""
+        },
+        "company": {
+          "description": "Company name",
+          "type": "string",
+          "default": ""
+        },
+        "jobTitle": {
+          "description": "Job title",
+          "type": "string",
+          "default": ""
+        },
+        "phoneNumber": {
+          "description": "Phone number",
+          "type": "string",
+          "default": ""
+        },
+        "homeStreet": {
+          "description": "Home street address",
+          "type": "string",
+          "default": ""
+        },
+        "homeCity": {
+          "description": "Home city",
+          "type": "string",
+          "default": ""
+        },
+        "homeState": {
+          "description": "Home state",
+          "type": "string",
+          "default": ""
+        },
+        "homeZip": {
+          "description": "Home zip code",
+          "type": "string",
+          "default": ""
+        },
+        "homeCountry": {
+          "description": "Home country",
+          "type": "string",
+          "default": ""
+        },
+        "busStreet": {
+          "description": "Business street address",
+          "type": "string",
+          "default": ""
+        },
+        "busCity": {
+          "description": "Business city",
+          "type": "string",
+          "default": ""
+        },
+        "busState": {
+          "description": "Business state",
+          "type": "string",
+          "default": ""
+        },
+        "busZip": {
+          "description": "Business zip code",
+          "type": "string",
+          "default": ""
+        },
+        "busCountry": {
+          "description": "Business country",
+          "type": "string",
+          "default": ""
+        },
+        "webPage": {
+          "description": "Web page URL",
+          "type": "string",
+          "default": ""
+        },
+        "additionalInfo": {
+          "description": "Additional notes about the contact (can be HTML)",
+          "type": "string",
+          "default": ""
+        },
+        "isHtml": {
+          "description": "Whether additional info is HTML formatted",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "folderId",
+        "contactId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_contact_group",
+    "description": "Update an existing contact group (add/remove members or rename)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderId": {
+          "description": "The ID of the contact folder",
+          "type": "string"
+        },
+        "groupId": {
+          "description": "The ID of the contact group to update",
+          "type": "string"
+        },
+        "addEmails": {
+          "description": "Comma-separated list of email addresses to add to the group",
+          "type": "string",
+          "default": ""
+        },
+        "removeEmails": {
+          "description": "Comma-separated list of email addresses to remove from the group",
+          "type": "string",
+          "default": ""
+        },
+        "newGroupName": {
+          "description": "New name for the group (leave empty to keep current name)",
+          "type": "string",
+          "default": ""
+        },
+        "newDescription": {
+          "description": "New description for the group (leave empty to keep current)",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "folderId",
+        "groupId"
+      ]
+    },
+    "category": "Contacts",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_content_filter",
+    "description": "Update an existing content filter. Only provided fields will be updated.\n\nSee create_content_filter for conditions and actions JSON format.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filterId": {
+          "description": "Filter ID to update (use get_content_filters to find IDs)",
+          "type": "string"
+        },
+        "title": {
+          "description": "New filter name/title (optional)",
+          "type": "string",
+          "default": ""
+        },
+        "matchType": {
+          "description": "New match type: 'And' or 'Or' (optional)",
+          "type": "string",
+          "default": ""
+        },
+        "conditions": {
+          "description": "New conditions JSON array (optional)",
+          "type": "string",
+          "default": ""
+        },
+        "actions": {
+          "description": "New actions JSON array (optional)",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "filterId"
+      ]
+    },
+    "category": "Settings",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_folder",
+    "description": "Update or create a folder for the user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The type of the folder to update (email, calendar, notes, tasks, contacts)",
+          "type": "string"
+        },
+        "name": {
+          "description": "The new name for the folder",
+          "type": "string"
+        },
+        "parentFolderId": {
+          "description": "The parent folder ID (owner/numeric_id) to nest the folder in (only for email create/update)",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID (owner/numeric_id) of the folder to update. If omitted, a new folder is created",
+          "type": "string"
+        },
+        "color": {
+          "description": "The hex color for the folder (only for calendars and tasks, e.g., #FF0000)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "parentFolderId",
+        "folderId",
+        "color"
+      ]
+    },
+    "category": "Folders",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "update_note",
+    "description": "Update a note in the specified folder",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "noteId": {
+          "description": "The ID of the note to update",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "The ID of the note source",
+          "type": "string"
+        },
+        "subject": {
+          "description": "Title for the note",
+          "type": "string"
+        },
+        "content": {
+          "description": "The html or plain text content of the note",
+          "type": "string"
+        },
+        "color": {
+          "description": "The hex color to associate with the note",
+          "type": "string"
+        },
+        "isHtml": {
+          "description": "Whether the content is HTML",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "noteId",
+        "folderId",
+        "subject",
+        "content",
+        "color",
+        "isHtml"
+      ]
+    },
+    "category": "Notes",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  },
+  {
+    "name": "upload_attachment",
+    "description": "Upload a file to attach to an email, then send it with send_email_with_attachments using the returned attachmentGuid. Give the file as exactly one of: base64Content (any file, base64-encoded), text (a text file's contents, e.g. .txt/.csv/.ics/.html) or filePath (only on a local server that shares your filesystem). For an image shown inside the HTML body, set inline=true and use the returned htmlReference as the src: <img src=\"cid:...\">. SmarterMail assigns the content ID, so always use the returned value. Several files go in one email by passing the first call's attachmentGuid to the next calls.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fileName": {
+          "description": "The attachment's file name, e.g. report.pdf or banner.png. Required with base64Content or text; the extension sets the content type unless contentType is given.",
+          "type": "string",
+          "default": ""
+        },
+        "base64Content": {
+          "description": "The file's bytes, base64-encoded (a data: URL is accepted too).",
+          "type": "string",
+          "default": ""
+        },
+        "text": {
+          "description": "The file's contents as text (sent as UTF-8). Use for text files instead of base64Content.",
+          "type": "string",
+          "default": ""
+        },
+        "filePath": {
+          "description": "Path to a file on the MCP server's own filesystem. Only works when the server shares your filesystem (a local stdio server); otherwise use base64Content or text.",
+          "type": "string",
+          "default": ""
+        },
+        "contentType": {
+          "description": "Optional MIME type, e.g. image/png. Defaults from the file name's extension.",
+          "type": "string",
+          "default": ""
+        },
+        "inline": {
+          "description": "true to embed the file (an image) in the HTML body via cid: instead of attaching it. The result's htmlReference is the src to use.",
+          "type": "boolean",
+          "default": false
+        },
+        "attachmentGuid": {
+          "description": "Optional: the attachmentGuid from an earlier upload_attachment call, to add this file to the same email.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "category": "Mail",
+    "scope": "Mailbox",
+    "write": true,
+    "destructive": false
+  }
+]

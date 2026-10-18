@@ -44,7 +44,7 @@ Environment: `PORT` (default `8787`, `0` picks a free port and logs it),
 `MODE=browser` (browser-only), `TASKS=false`, `TRIGGERS=false` (no condition tasks),
 `TASKS_ACCESS=invite` (tasks need an invite code; the stub's is `STUB-INVT-CODE-0000`),
 `ADMIN=1` (every profile is an admin: the Profile menu's Invites section, `/api/admin/*`),
-`SEED_PROFILE=1` (below).
+`SEED_PROFILE=1` (below), `TOOLS=full` (below).
 
 In a remembered session every tool call and account change bumps the resume
 version (as a real refresh would rotate a token), and a cookie request that
@@ -63,6 +63,17 @@ sent an older `X-Resume-Version` gets the newer number back.
 | | `get_spool_messages` | Spool | |
 | | `delete_domain` | Domains | ✓ |
 | | `enable_dkim` | DKIM | ✓ |
+
+`TOOLS=full` serves the real tool contract (the 166 mailbox + domain-admin and
+58 system-admin tools, from `local-model/fixtures/`, see its README) instead of
+the ten above. The role, scope, read-only and `account` rules are the same. A
+tool with no canned answer returns `{ success: true, tool, note: "stub result",
+echo: arguments }`; `get_*`, `list_*` and `domain_list_*` return three fake
+`example.com` items.
+
+```sh
+TOOLS=full node wwwroot/dev/stub-server.mjs
+```
 
 ## Login fixtures
 

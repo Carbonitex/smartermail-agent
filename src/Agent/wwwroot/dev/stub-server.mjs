@@ -161,6 +161,20 @@ const TOOLS = [
   }
 ];
 
+/* TOOLS=full serves the real tool contract instead: the DomainAdmin and
+   SysAdmin fixtures (single-account, read-write, so no injected `account`)
+   merged by name. The array is replaced in place; everything else (role and
+   scope rules, `account` injection) runs on it unchanged. */
+const FULL = process.env.TOOLS === 'full';
+if (FULL) {
+  const dir = path.join(HERE, 'local-model', 'fixtures');
+  const byName = new Map();
+  for (const f of ['tools-domainadmin.json', 'tools-sysadmin.json']) {
+    for (const t of JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))) byName.set(t.name, t);
+  }
+  TOOLS.splice(0, TOOLS.length, ...byName.values());
+}
+
 /** Which account roles may run a tool of each scope. */
 const SCOPE_ROLES = {
   Mailbox: ['User', 'DomainAdmin'],
@@ -267,8 +281,21 @@ function runTool(name, args, session) {
     case 'enable_dkim':
       return { isError: false, content: JSON.stringify({ success: true, domain: args.domain, dkim: 'enabled' }) };
     default:
-      return null;
+      return FULL ? genericResult(name, args, domain) : null;
   }
+}
+
+/** TOOLS=full: a plausible answer for a tool with no canned one. Reads get a few fake items. */
+function genericResult(name, args, domain) {
+  const reads = /^(get_|list_|domain_list_)/.test(name);
+  const body = reads
+    ? {
+        success: true,
+        tool: name,
+        items: [1, 2, 3].map((n) => ({ id: String(n), name: `item-${n}`, email: `user${n}@${domain}`, domain }))
+      }
+    : { success: true, tool: name, note: 'stub result', echo: args };
+  return { isError: false, content: JSON.stringify(body, null, 2) };
 }
 
 /* ---------------------------------------------------------------- sessions
@@ -947,5 +974,5 @@ server.listen(PORT, () => {
   console.log('  two-factor  : 2fa*@… → challenge (code 123456); expired*@… → 403 CHANGE_PASSWORD_NEEDED');
   console.log('  roles       : admin / admin*@… / sysadmin*@… → SysAdmin; domainadmin*@… → DomainAdmin; else User');
   console.log(`  accounts    : POST /api/accounts adds (max ${MAX_ACCOUNTS}); DELETE /api/accounts/{id}`);
-  console.log(`  tools       : ${TOOLS.map((t) => t.name + (t.write ? '*' : '')).join(', ')}  (* = write)`);
+  console.log(`  tools       : ${FULL ? `${TOOLS.length} (TOOLS=full, from local-model/fixtures)` : TOOLS.map((t) => t.name + (t.write ? '*' : '')).join(', ')}  (* = write)`);
 });

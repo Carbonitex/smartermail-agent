@@ -97,6 +97,13 @@
           It stays in this browser tab (<code>sessionStorage</code>) and is sent straight to OpenRouter —
           this site's server never sees it and never pays for your tokens. Closing the tab forgets it.
         </p>
+        <!-- EXPERIMENTAL: local-model-ui.js -->
+        <label class="checkbox">
+          <input id="f-local-model" type="checkbox">
+          <span><strong>No key? Try the in-browser model</strong> (experimental)<br>
+          <span class="hint inline">A small model (LFM2.5 2.6B) runs on this device with WebGPU, so no OpenRouter key is needed.
+            The first message downloads about 1.5–1.9 GB, which the browser caches. Far weaker than an OpenRouter model.</span></span>
+        </label>
       </fieldset>
 
       <p id="login-error" class="error-line" role="alert" hidden></p>
@@ -224,6 +231,9 @@
       <button id="btn-offer-dismiss" class="btn btn-ghost btn-small" type="button">Not now</button>
     </div>
   </div>
+
+  <!-- EXPERIMENTAL: the in-browser model's status, or a key field for an OpenRouter model chosen without one (local-model-ui.js) -->
+  <div id="local-model-bar" class="local-model-bar" role="status" hidden></div>
 
   <main id="messages" class="messages" aria-live="polite" aria-relevant="additions text">
     <div id="empty-state" class="empty-state">

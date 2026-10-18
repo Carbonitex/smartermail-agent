@@ -290,7 +290,8 @@ function decidedRow(p) {
   return row;
 }
 
-function argumentsTable(argsJson) {
+/** The review table for argsJson (also the local model's write gate, via chat.js). */
+export function argumentsTable(argsJson) {
   const rows = argumentRows(argsJson);
   const table = document.createElement('table');
   table.className = 'approval-args';

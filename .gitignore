@@ -9,3 +9,7 @@ CLAUDE.local.md
 
 # Server-mode data when running the agent locally (DATA_DIR defaults to ./data)
 src/Agent/data/
+
+# Dev-only local-model smoke test (src/Agent/wwwroot/dev/local-model): its npm install and model cache
+src/Agent/wwwroot/dev/local-model/node_modules/
+src/Agent/wwwroot/dev/local-model/results/

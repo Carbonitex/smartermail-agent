@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Agent (experimental): an in-browser model. "Local · LFM2.5 2.6B" in the model picker (or "No key?
+  Try the in-browser model" at sign-in) runs LiquidAI LFM2.5-2.6B on your GPU through Transformers.js
+  and WebGPU, with no OpenRouter key. The model (~1.5–1.9 GB) downloads once and is cached by the
+  browser. Each request offers it only the 8–12 most relevant tools; invalid tool calls are answered
+  in the browser, and every write it attempts waits on an Approve / Deny card. Large-result analysis
+  is off for it, and scheduled tasks cannot use it. Needs a WebGPU browser over HTTPS or localhost.
 - Agent (server mode): standing instructions for a profile (Profile → Settings, up to 4,000
   characters), added to the end of every chat's system prompt from the encrypted settings, and, when
   chosen, of every scheduled run's from a copy sealed with `DATA_KEY`

@@ -696,3 +696,37 @@ dialog.code-modal { width: min(520px, calc(100vw - 24px)); }
 .json-pick:hover, .json-pick:focus-visible { background: var(--accent-soft); }
 .json-key { color: var(--text-dim); }
 .json-value { color: var(--teal); }
+
+/* EXPERIMENTAL in-browser model (local-model-ui.js): status bar, per-round thinking, stats and debug */
+
+.local-model-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  margin: 10px 14px 0; padding: 8px 14px;
+  background: oklch(14% 0.02 175); border: 1px solid oklch(72% 0.14 175 / 0.3); border-radius: var(--radius-sm);
+  font-size: .84rem; color: var(--text-dim);
+}
+.local-model-bar.warn { background: oklch(18% 0.05 85 / 0.35); border-color: oklch(70% 0.15 85 / 0.35); }
+.local-model-bar strong { color: var(--teal); font-weight: 600; }
+.local-model-status { flex: 1 1 280px; }
+.local-model-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.local-model-progress { width: 140px; accent-color: oklch(72% 0.14 175); }
+.local-model-bar .local-model-key { width: 200px; padding: 5px 8px; font-size: .82rem; }
+.local-model-debug { display: flex; align-items: center; gap: 4px; margin: 0; font-size: .8rem; color: var(--text-faint); cursor: pointer; }
+.local-model-debug input { width: 14px; height: 14px; }
+
+.local-round { align-self: flex-start; max-width: min(820px, 100%); font-size: .8rem; color: var(--text-faint); }
+.local-think > summary, .local-debug > summary { cursor: pointer; font-size: .78rem; }
+.local-think > .tool-pre, .local-debug > .tool-pre { margin-top: 4px; color: var(--text-dim); }
+.local-stats { font-family: var(--mono); font-size: .74rem; }
+.local-debug { display: none; margin-top: 4px; }
+.local-debug .tool-label { margin-top: 8px; }
+.messages.local-debug-on .local-debug { display: block; }
+
+/* the write gate's card (a tool card waiting for Approve / Deny); destructive ones in red */
+.local-confirm { border-color: oklch(75% 0.12 80 / 0.55); }
+.local-confirm.destructive { background: oklch(13% 0.04 25); border: 2px solid oklch(60% 0.22 25 / 0.8); }
+.local-confirm.destructive .tool-name, .local-confirm.destructive .tool-status.running { color: var(--red); }
+.local-confirm-note { margin: 0 0 6px; font-size: .82rem; color: var(--amber); }
+.local-confirm.destructive .local-confirm-note { color: var(--red); font-weight: 600; }
+.local-confirm .approval-args { margin-top: 0; }
+.local-confirm-actions { display: flex; gap: 8px; margin-top: 10px; }

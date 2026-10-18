@@ -15,6 +15,11 @@ running your own.
   call.
 - **Your AI key stays in your browser.** The chat loop runs in the page and talks to OpenRouter
   directly. The server never sees the key and never pays for inference.
+- **Or no AI key at all (experimental).** Pick "Local · LFM2.5 2.6B" in the model picker, or tick
+  "No key? Try the in-browser model" at sign-in, and a small model runs on your own GPU through
+  WebGPU (a recent Chrome or Edge, over HTTPS or `localhost`). It downloads once (~1.5–1.9 GB, cached
+  by the browser) and sees only the tools that match each request. It is much weaker than a hosted
+  model, so every change it wants to make waits for you to approve it. Scheduled tasks can't use it.
 - **Mail credentials are used once.** They are exchanged for a SmarterMail token at sign-in and not
   stored. The token lives in the server's memory for the session: until logout, 30 idle minutes, or
   12 hours. The server then asks SmarterMail to revoke it.
