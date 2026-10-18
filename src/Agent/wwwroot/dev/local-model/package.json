@@ -1,10 +1,12 @@
 {
   "name": "smartermail-agent-local-model-dev",
   "private": true,
-  "description": "Dev-only: smoke test for the experimental in-browser local model (js/local-llm.js) under Node.",
+  "description": "Dev-only: smoke test and task-suite evaluation for the experimental in-browser local model (js/local-llm.js) under Node.",
   "type": "module",
   "scripts": {
-    "smoke": "node smoke.mjs"
+    "smoke": "node smoke.mjs",
+    "eval": "node eval.mjs",
+    "eval:retrieval": "node eval.mjs --retrieval-only"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1"

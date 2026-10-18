@@ -90,6 +90,28 @@ const searchItems = args => {
   return { section: args.section || 'Everywhere', emails: mail, contacts: [], notes: [], events: [], tasks: [] };
 };
 
+/** Message bodies for the INBOX (uid → text); a message without one reads as its preview. */
+const BODIES = {
+  5120: 'Hi, about the site visit on Tuesday: does 10am work for you? Dave',
+  4412: 'Hi, could you send me the Q3 budget spreadsheet by Friday? Thanks, Alice',
+  3021: 'Your invoice 1042 for October is attached. Billing',
+  4390: 'Coffee next week? Alice',
+  3055: 'Click here to claim your free cruise!!!'
+};
+/**
+ * get_email_message / read_email_part over the INBOX: the message by uid, with
+ * its body, or the error the server gives for an unknown uid. Shared by every
+ * task that lists mail, so reading a message the list returned is never a dead end.
+ */
+const readMessage = args => {
+  const m = INBOX.find(x => String(x.uid) === String(args.uid));
+  if (!m) return { isError: true, content: `{"success":false,"error":"No message with uid ${args.uid} in ${args.folderId || 'that folder'}"}` };
+  const { preview, ...meta } = m;
+  return { ...meta, body: BODIES[m.uid] || preview || '' };
+};
+const READS = { get_email_message: readMessage, read_email_part: readMessage };
+const MAILBOX_DEFAULTS = { ...IS_FOLDERS, ...READS, get_emails: getEmails, search_items: searchItems };
+
 const CONTACT_FRANK = { id: 'c-77', firstName: 'Frank', lastName: 'Example', email: 'frank@example.org', displayAs: 'Frank Example', company: 'Example Org' };
 
 const OK = { success: true };
@@ -104,9 +126,14 @@ export function DEFAULT_MOCK(name) {
   return { isError: true, content: `Unexpected tool for this scenario: ${name}` };
 }
 
-/** Result of a call: the task's mock, else the default. Strings or objects pass through unchanged. */
+/**
+ * Result of a call: the task's mock, else for a role with a mailbox the shared
+ * mailbox reads (listing folders, reading a message the inbox returned: always a
+ * reasonable step, never the point of a task), else the default. Strings or
+ * objects pass through unchanged.
+ */
 export function mockResult(task, name, args) {
-  const fn = task.mocks && task.mocks[name];
+  const fn = (task.mocks && task.mocks[name]) || (task.role !== 'sysadmin' && MAILBOX_DEFAULTS[name]);
   return fn ? fn(args || {}) : DEFAULT_MOCK(name);
 }
 
@@ -117,7 +144,7 @@ export const TASKS = [
   {
     id: 'u-unread-summary', role: 'user',
     prompt: 'What unread emails do I have in my inbox? Give me a quick summary.',
-    mocks: { get_emails: getEmails, search_items: searchItems },
+    mocks: { get_emails: getEmails, search_items: searchItems, ...READS },
     expect: {
       calls: [{
         name: ['get_emails', 'search_items'],
@@ -132,7 +159,7 @@ export const TASKS = [
   {
     id: 'u-search-sender', role: 'user',
     prompt: 'Find the emails from billing@example.org.',
-    mocks: { get_emails: getEmails, search_items: searchItems },
+    mocks: { get_emails: getEmails, search_items: searchItems, ...READS },
     expect: {
       calls: [{
         name: ['get_emails', 'search_items'],
@@ -148,17 +175,13 @@ export const TASKS = [
     id: 'u-read-latest', role: 'user',
     prompt: 'Read my most recent email from Alice Example and tell me what she wants.',
     mocks: {
-      ...IS_FOLDERS, get_emails: getEmails, search_items: searchItems,
-      get_email_message: a => ({
-        uid: num(a.uid), from: 'Alice Example <alice@example.org>', subject: 'Q3 budget', date: '2026-10-16T09:12:00Z',
-        body: 'Hi, could you send me the Q3 budget spreadsheet by Friday? Thanks, Alice'
-      })
+      ...IS_FOLDERS, get_emails: getEmails, search_items: searchItems, ...READS
     },
     expect: {
       ordered: true,
       calls: [
-        { name: ['get_emails', 'search_items'], args: a => has(a.query, 'alice') || has(a.searchQuery, 'alice'), argKeys: ['query', 'searchQuery'], desc: 'find Alice\'s emails' },
-        { name: 'get_email_message', args: a => idIn(a.uid, 4412), argKeys: ['uid'], desc: 'open the latest one (uid 4412)' }
+        { name: ['get_emails', 'search_items'], args: a => has(a.query, 'alice') || has(a.searchQuery, 'alice') || (a.searchQuery === undefined && !text(a.query).replace(/is:\w+/g, '').trim()), argKeys: ['query', 'searchQuery'], desc: 'find Alice\'s emails (a search, or the inbox listing)' },
+        { name: ['get_email_message', 'read_email_part'], args: a => idIn(a.uid, 4412), argKeys: ['uid'], desc: 'open the latest one (uid 4412)' }
       ],
       forbid: ['remove_emails', 'send_email', 'reply_to_email'], maxCalls: 5,
       answer: answers('budget'), answerDesc: 'says she wants the Q3 budget'
@@ -168,7 +191,11 @@ export const TASKS = [
   {
     id: 'u-attachments', role: 'user',
     prompt: 'Does the email with uid 3021 in my Inbox have any attachments?',
-    mocks: { get_email_attachments: () => [{ filename: 'invoice-1042.pdf', size: 48211, contentType: 'application/pdf' }] },
+    mocks: {
+      get_email_attachments: () => [{ filename: 'invoice-1042.pdf', size: 48211, contentType: 'application/pdf' }],
+      ...READS,
+      get_email_message: a => ({ ...readMessage(a), attachments: [{ filename: 'invoice-1042.pdf', size: 48211 }] })
+    },
     expect: {
       calls: [{
         name: ['get_email_attachments', 'get_email_message'],
@@ -243,11 +270,12 @@ export const TASKS = [
   {
     id: 'u-reply-latest', role: 'user',
     prompt: 'Reply to the latest email from Dave Example and say that I will be there at 10.',
-    mocks: { get_emails: getEmails, search_items: searchItems, reply_to_email: () => OK },
+    mocks: { get_emails: getEmails, search_items: searchItems, ...READS, reply_to_email: () => OK },
     expect: {
       ordered: true,
       calls: [
-        { name: ['get_emails', 'search_items'], args: a => has(a.query, 'dave') || has(a.searchQuery, 'dave'), argKeys: ['query', 'searchQuery'], desc: 'find Dave\'s email' },
+        // a search for Dave, or a plain listing of the inbox (he is in it)
+        { name: ['get_emails', 'search_items'], args: a => has(a.query, 'dave') || has(a.searchQuery, 'dave') || (a.searchQuery === undefined && !text(a.query).replace(/is:\w+/g, '').trim()), argKeys: ['query', 'searchQuery'], desc: 'find Dave\'s email' },
         { name: 'reply_to_email', args: a => idIn(a.uid, 5120) && has(a.body, '10'), argKeys: ['uid', 'body'], desc: 'reply to uid 5120 mentioning 10' }
       ],
       forbid: ['send_email', 'forward_email', 'remove_emails'], maxCalls: 4
@@ -372,7 +400,7 @@ export const TASKS = [
     mocks: IS_FOLDERS,
     expect: {
       calls: [{ name: 'list_folder_info_by_type', args: a => a.type === undefined || num(a.type) === 1, argKeys: ['type'], desc: 'list mail folders' }],
-      forbid: ['remove_folder', 'create_folder', 'update_folder'], maxCalls: 2,
+      forbid: ['remove_folder', 'create_folder', 'update_folder'], maxCalls: 4, // one listing per folder type is fine
       answer: answers('receipts'), answerDesc: 'lists the Receipts folder'
     },
     tags: ['read']
@@ -464,15 +492,18 @@ export const TASKS = [
     id: 'd-mailing-lists', role: 'domainadmin',
     prompt: 'Which mailing lists do we have, and how many subscribers does the team list have?',
     mocks: {
-      domain_list_mailing_lists: () => [{ id: 'ml-101', listAddress: 'team@example.com' }, { id: 'ml-102', listAddress: 'news@example.com' }],
-      domain_get_mailing_list: a => ({ id: a.mailingListId, listAddress: 'team@example.com', subscriberCount: 12 }),
-      domain_search_mailing_list_subscribers: a => ({ mailingListId: a.mailingListId, totalCount: 12, subscribers: [] })
+      // mailingListId is an integer in the tool's schema.
+      domain_list_mailing_lists: () => [{ id: 101, listAddress: 'team@example.com' }, { id: 102, listAddress: 'news@example.com' }],
+      domain_get_mailing_list: a => (num(a.mailingListId) === 101 ? { id: 101, listAddress: 'team@example.com', subscriberCount: 12 }
+        : num(a.mailingListId) === 102 ? { id: 102, listAddress: 'news@example.com', subscriberCount: 3 }
+          : { isError: true, content: `{"success":false,"error":"Mailing list ${a.mailingListId} not found"}` }),
+      domain_search_mailing_list_subscribers: a => ({ mailingListId: a.mailingListId, totalCount: num(a.mailingListId) === 101 ? 12 : 3, subscribers: [] })
     },
     expect: {
       ordered: true,
       calls: [
         { name: 'domain_list_mailing_lists', desc: 'list the mailing lists' },
-        { name: ['domain_get_mailing_list', 'domain_search_mailing_list_subscribers'], args: a => has(a.mailingListId, 'ml-101'), argKeys: ['mailingListId'], desc: 'inspect the team list (ml-101)' }
+        { name: ['domain_get_mailing_list', 'domain_search_mailing_list_subscribers'], args: a => num(a.mailingListId) === 101, argKeys: ['mailingListId'], desc: 'inspect the team list (101)' }
       ],
       forbid: ['domain_delete_mailing_lists', 'domain_remove_mailing_list_subscribers'], maxCalls: 4,
       answer: t => has(t, 'team@example.com', 'team') && has(t, '12'), answerDesc: 'says the team list has 12 subscribers'
@@ -482,7 +513,10 @@ export const TASKS = [
   {
     id: 'd-set-forwarding', role: 'domainadmin',
     prompt: 'Forward all mail for the mailbox alice to alice.personal@example.org, and keep a copy in her mailbox.',
-    mocks: { domain_set_mailbox_forwarding: () => OK, domain_get_mailbox_forwarding: () => ({ forwardTo: '', deleteOnForward: false }) },
+    mocks: {
+      domain_set_mailbox_forwarding: () => OK, domain_get_mailbox_forwarding: () => ({ forwardTo: '', deleteOnForward: false }),
+      domain_get_user_mail_settings: () => ({ username: 'alice', forwardTo: '', deleteOnForward: false, autoResponder: false })
+    },
     expect: {
       calls: [{
         name: 'domain_set_mailbox_forwarding',
@@ -496,7 +530,7 @@ export const TASKS = [
   {
     id: 'd-mailbox-unread', role: 'domainadmin',
     prompt: 'Show me my own unread emails.',
-    mocks: { get_emails: getEmails, search_items: searchItems },
+    mocks: { get_emails: getEmails, search_items: searchItems, ...READS },
     expect: {
       calls: [{ name: ['get_emails', 'search_items'], desc: 'mailbox tool found among the domain tools' }],
       forbid: c => /^domain_/.test(c.name) && /delete|disable|disconnect/.test(c.name), maxCalls: 4,
@@ -591,7 +625,7 @@ export const TASKS = [
   {
     id: 'm-inbox-user', role: 'multi',
     prompt: 'Check my inbox for unread mail.',
-    mocks: { get_emails: getEmails, search_items: searchItems },
+    mocks: { get_emails: getEmails, search_items: searchItems, ...READS },
     expect: {
       calls: [{
         name: ['get_emails', 'search_items'],

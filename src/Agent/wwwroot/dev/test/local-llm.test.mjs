@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  tokenize, rankTools, selectTools, fuseRankings, calledToolNames,
+  tokenize, rankTools, selectTools, fuseRankings, calledToolNames, retrievalQuery, buildToolIndex,
   parsePythonicCalls, parseJsonCalls, parseModelOutput,
   coerceArguments, validateToolCall, toolsByName, canonicalJson,
   fitToBudget, estimateTokens, toTemplateMessages,
@@ -68,9 +68,10 @@ test('rankTools: function tools with categoryOf rank exactly like contract tools
   }
 });
 
-test('selectTools: k tools, in the input order, the obvious one included', () => {
+test('selectTools: k tools (plus their lookups, within k + 4), in the input order, the obvious one included', () => {
   const sel = selectTools(TOOLS, [user('Send an email to bob@example.com saying hi')], { k: 4 });
-  assert.ok(sel.length <= 4 && sel.length > 0);
+  assert.ok(sel.length <= 4 + 4 && sel.length > 0);
+  assert.ok(selectTools(TOOLS, [user('Send an email to bob@example.com saying hi')], { k: 4, companions: 0 }).length <= 4);
   assert.ok(names(sel).includes('send_email'));
   const order = names(TOOLS);
   assert.deepEqual(names(sel), [...names(sel)].sort((a, b) => order.indexOf(a) - order.indexOf(b)));
@@ -114,6 +115,51 @@ test('selectTools: extra rankings (an embedding ranker) are fused with BM25', ()
 test('selectTools: the latest user message drives retrieval, not an older topic', () => {
   const messages = [user('show my notes'), { role: 'assistant', content: 'You have none.' }, user('send an email to my boss'), { role: 'assistant', content: 'What should it say?' }, user('that I am late')];
   assert.ok(names(selectTools(TOOLS, messages, { k: 3 })).includes('send_email'));
+});
+
+test('tokenize: a hyphenated word also counts joined ("to-do" is "todo")', () => {
+  assert.ok(tokenize('my to-do list').includes('todo'));
+  assert.ok(tokenize('an e-mail').includes('email'));
+});
+
+test('retrievalQuery: quoted values are data, not the request', () => {
+  const q = retrievalQuery([user('Add a task "Renew domain" due on Friday')]);
+  assert.ok(q.has('task'));
+  assert.ok(!q.has('domain') && !q.has('renew'));
+});
+
+test('retrievalQuery: email used as a verb asks to send', () => {
+  assert.equal(retrievalQuery([user('Email me the list of domains')]).get('send'), 1);
+  assert.equal(retrievalQuery([user('Find the users and then mail them to bob@example.com')]).get('send'), 1);
+  assert.ok(!retrievalQuery([user('Find the emails from billing@example.org')]).has('send'));
+  assert.ok(!retrievalQuery([user('Read the email from Alice')]).has('send'));
+});
+
+test('retrievalQuery: a reply that names no tool leans on the request before it', () => {
+  const index = buildToolIndex(TOOLS);
+  const messages = [user('send an email to bob@example.com saying hi'), { role: 'assistant', content: 'Shall I?' }, user('Yes, go ahead.')];
+  assert.ok(retrievalQuery(messages, { index }).get('send') > 0.5);
+  assert.equal(retrievalQuery(messages).get('send'), 0.5, 'without an index: the usual half weight');
+  const topical = [user('send an email to bob@example.com'), { role: 'assistant', content: 'Sent.' }, user('now show my calendar')];
+  assert.equal(retrievalQuery(topical, { index }).get('send'), 0.5);
+});
+
+test('rankTools: asked for a change, tools that change things rank above readers', () => {
+  // "mark … read" matches get_emails' description too; the change wins.
+  const top = rankTools(TOOLS, 'mark my emails as read flagged').map((r) => r.name);
+  assert.ok(top.indexOf('set_email_properties') < top.indexOf('get_emails'), top.join());
+});
+
+test('selectTools: lookups the chosen tools need come along (folder lister, the category finder)', () => {
+  const sel = names(selectTools(TOOLS, [user('move the message with uid 7 to my Archive')], { k: 2 }));
+  assert.ok(sel.includes('move_emails'), sel.join());
+  assert.ok(sel.includes('list_folder_info_by_type'), `the folder ids: ${sel.join()}`);
+  assert.ok(sel.includes('get_emails'), `finds the message: ${sel.join()}`);
+  assert.ok(sel.length <= 2 + 4, 'within maxTools');
+  const none = names(selectTools(TOOLS, [user('move the message with uid 7 to my Archive')], { k: 2, companions: 0 }));
+  assert.ok(none.length <= 2 && none.includes('move_emails'), none.join());
+  // a finder needs no lookup of its own
+  assert.ok(!names(selectTools(TOOLS, [user('what meetings do I have tomorrow')], { k: 1 })).includes('list_folder_info_by_type'));
 });
 
 /* --------------------------------------------------------------- parsing */
@@ -332,6 +378,11 @@ test('toTemplateMessages: arguments as objects, broken JSON as {}, empty assista
   ]);
 });
 
+test('toTemplateMessages: top-level null arguments are left out (the template cannot print them)', () => {
+  const out = toTemplateMessages([{ role: 'assistant', content: '', tool_calls: [{ id: '1', type: 'function', function: { name: 'a', arguments: '{"kind":null,"n":0,"o":{"x":null}}' } }] }]);
+  assert.deepEqual(out[0].tool_calls[0].function.arguments, { n: 0, o: { x: null } });
+});
+
 /* ------------------------------------------------------------- streaming */
 
 function feed(splitter, text, size = 1) {
@@ -387,17 +438,19 @@ function fakeRuntime(outputs, { piece = 4, onStep = null } = {}) {
   const vocab = ['<|im_end|>'];
   const idOf = (s) => { let i = vocab.indexOf(s); if (i < 0) { vocab.push(s); i = vocab.length - 1; } return BigInt(i); };
   const rendered = [];
-  const tokenizer = {
+  const encoded = (text) => { const len = Math.ceil(String(text).length / 4); return { input_ids: { dims: [1, len] }, attention_mask: { dims: [1, len] } }; };
+  const tokenizer = Object.assign((text) => encoded(text), {
     eos_token_id: 0,
     decode(ids, { skip_special_tokens = false } = {}) {
       return ids.map((i) => vocab[Number(i)]).filter((t) => !(skip_special_tokens && t === '<|im_end|>')).join('');
     },
+    encode: (text) => [idOf(text)],
     apply_chat_template(messages, opts) {
+      if (opts.tokenize === false) return `PROMPT ${JSON.stringify(messages)}`;
       rendered.push({ messages, tools: opts.tools });
-      const len = Math.ceil(JSON.stringify({ messages, tools: opts.tools }).length / 4);
-      return { input_ids: { dims: [1, len] }, attention_mask: { dims: [1, len] } };
+      return encoded(JSON.stringify({ messages, tools: opts.tools }));
     }
-  };
+  });
   let n = 0;
   const calls = [];
   const model = {
@@ -542,6 +595,48 @@ test('createLocalStream: guard covers localTools (analyze_result) too', async ()
   assert.equal(ran, false);
   assert.match(r.content, /missing required argument "question"/);
   assert.equal(stream.rejection('analyze_result', { artifact: 'r1' }), r.content);
+});
+
+test('createLocalStream: an unchanged repeat of a failed call is answered locally, until the next user turn', async () => {
+  const call = `x</think>${S}[get_tasks()]${E}`;
+  const rt = fakeRuntime([call, call, call]);
+  const stream = createLocalStream({ getModel: async () => rt });
+  const messages = [user('my tasks?')];
+  let calls = 0;
+  const g = stream.guard({ callTool: async () => { calls++; return { isError: true, content: 'Folder not found\nmore detail' }; } });
+  await stream({ messages, tools: TOOLS });
+  assert.equal((await g.callTool('get_tasks', {})).content, 'Folder not found\nmore detail');
+  await stream({ messages, tools: TOOLS });
+  const again = await g.callTool('get_tasks', {});
+  assert.equal(calls, 1, 'the repeat never reached the server');
+  assert.equal(again.isError, true);
+  assert.match(again.content, /already failed in this turn: Folder not found Do not repeat it/);
+  assert.equal(stream.repeatRejection('get_tasks', {}), again.content);
+  assert.equal((await g.callTool('get_tasks', { folderId: 'x' })).content, 'Folder not found\nmore detail', 'other arguments still run');
+  messages.push({ role: 'assistant', content: 'It failed.' }, user('try again please'));
+  await stream({ messages, tools: TOOLS });
+  await g.callTool('get_tasks', {});
+  assert.equal(calls, 3, 'a new user turn may retry');
+});
+
+test('createLocalStream: reasoning past thinkBudget is closed and the answer generated after it', async () => {
+  // One token per character: the first generation would think for 200 tokens.
+  const rt = fakeRuntime(['x'.repeat(200) + '</think>late', 'The answer.'], { piece: 1 });
+  const stream = createLocalStream({ getModel: async () => rt, thinkBudget: 50, maxNewTokens: 400 });
+  const reasoning = [];
+  const r = await stream({ messages: [user('q')], tools: TOOLS, onReasoning: (s) => reasoning.push(s) });
+  assert.equal(rt.calls.length, 2, 'a second generation after the forced </think>');
+  assert.equal(r.content, 'The answer.');
+  assert.equal(r.reasoning, 'x'.repeat(50));
+  assert.equal(stream.last.thinkingCut, true);
+  assert.ok(rt.calls[1].max_new_tokens <= 400 - 50);
+  assert.equal(r.finishReason, 'stop');
+  // under the budget nothing changes
+  const rt2 = fakeRuntime(['short</think>Fine.'], { piece: 1 });
+  const s2 = createLocalStream({ getModel: async () => rt2, thinkBudget: 50 });
+  assert.equal((await s2({ messages: [user('q')], tools: TOOLS })).content, 'Fine.');
+  assert.equal(rt2.calls.length, 1);
+  assert.equal(s2.last.thinkingCut, false);
 });
 
 test('createLocalStream: a bare JSON call is held back from the visible stream', async () => {

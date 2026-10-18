@@ -31,7 +31,8 @@
  *   createLocalStream({ getModel, k, maxTools, contextTokens, maxNewTokens, … })
  *       → stream(opts)            drop-in for llm.js streamCompletion
  *         stream.guard({ callTool, localTools })  → wrapped pair for runTurn, which
- *                                  answers the calls this module rejected
+ *                                  answers the calls this module rejected, and an
+ *                                  unchanged repeat of a call that already failed this turn
  *         stream.last             diagnostics of the latest round (raw output, timings…)
  *   selectTools(tools, messages, { k, … })   → subset of `tools`, input order
  *   rankTools(tools, query, { … })           → [{ name, score }], best first
@@ -62,12 +63,14 @@ export const TRANSFORMERS_CDN_URL = `https://cdn.jsdelivr.net/npm/@huggingface/t
 export const DEFAULT_CONTEXT_TOKENS = 16384;
 export const DEFAULT_MAX_NEW_TOKENS = 2048;
 export const DEFAULT_TOOL_K = 8;
+/** Reasoning tokens per round before `</think>` is forced (0 = no limit). */
+export const DEFAULT_THINK_BUDGET = 1024;
 
 /** The model card's recommended sampling (LFM2.5-2.6B generation_config.json). */
 export const LOCAL_SAMPLING = Object.freeze({ do_sample: true, temperature: 0.1, top_k: 50, repetition_penalty: 1.1 });
 
 /** Appended to the system prompt: the model only ever sees a subset of the tools. */
-export const LOCAL_TOOL_NOTE = 'Only the tools in the list below are available right now. Call them by their exact names with the argument names from their schemas. If none of them fits the request, say so instead of guessing.';
+export const LOCAL_TOOL_NOTE = 'Only the tools in the list below are available right now. Call them by their exact names with the argument names from their schemas. If none of them fits the request, say so instead of guessing. A general question that needs nothing from the mail server is answered directly, without a tool. When a tool fails, do not repeat the same call: fix the arguments, try another tool, or explain the problem.';
 
 export const TOOL_CALL_START = '<|tool_call_start|>';
 export const TOOL_CALL_END = '<|tool_call_end|>';
@@ -131,7 +134,7 @@ const SYNONYMS = {
   meeting: ['calendar', 'event', 'appointment'], appointment: ['calendar', 'event'], event: ['calendar'],
   schedule: ['calendar', 'event'], agenda: ['calendar', 'event'], invite: ['meeting', 'event'], today: ['calendar'], tomorrow: ['calendar'],
   person: ['contact'], people: ['contact'], address: ['contact', 'email'], phone: ['contact'],
-  todo: ['task'], reminder: ['task'], note: ['notes'], notes: ['note'],
+  reminder: ['task'], note: ['notes'], notes: ['note'],
   add: ['create', 'new'], create: ['add', 'new'], new: ['create'], change: ['update', 'set'], edit: ['update'], rename: ['update'],
   delete: ['remove'], remove: ['delete'], trash: ['delete', 'remove'], erase: ['delete'],
   find: ['search'], look: ['search'], search: ['find'], list: ['get'],
@@ -140,13 +143,20 @@ const SYNONYMS = {
   user: ['users', 'account'], account: ['user'], mailbox: ['user', 'folder'], alias: ['aliases'],
   domain: ['domains'], server: ['system'], queue: ['spool'], certificate: ['ssl', 'certificates'], cert: ['certificate', 'ssl'],
   log: ['logs', 'search'], logs: ['log'], blocked: ['block'], ip: ['address'],
-  signature: ['signatures'], forwarding: ['forward'], password: ['passwords'], group: ['groups']
+  signature: ['signatures'], forwarding: ['forward'], password: ['passwords', 'user'], group: ['groups'],
+  reset: ['update', 'set', 'change'], subject: ['email', 'send'], recipient: ['send', 'email'],
+  latest: ['emails'], recent: ['emails'], newest: ['emails'],
+  throw: ['delete', 'remove'], discard: ['delete', 'remove'], rid: ['delete', 'remove'],
+  unknown: ['catch'], nonexistent: ['catch'], logout: ['session', 'disconnect', 'kill'], signout: ['logout'],
+  todo: ['task'], autoreply: ['reply', 'filter']
 };
 
 /** Tokens for retrieval: lower-case, camelCase and snake_case split, stop words out, light stemming. */
 export function tokenize(text) {
   const out = [];
   const spaced = String(text || '')
+    // "to-do", "e-mail", "auto-reply": the joined word too.
+    .replace(/\b([A-Za-z]{1,6})-([A-Za-z]{2,8})\b/g, '$1$2 $1 $2')
     // An address or a host name says "address" / "domain", not "example" and "com".
     .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, ' address ')
     .replace(/\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|edu|gov|io|dev|co|uk|de|info|biz|local|example|test)\b/gi, ' domain ')
@@ -228,7 +238,10 @@ export function buildToolIndex(tools, { categoryOf = null } = {}) {
 
 /** Weighted query terms: the text's tokens at `weight`, their synonyms at 0.4 × weight. */
 function queryTerms(text, weight, into = new Map()) {
-  for (const tok of tokenize(text)) {
+  // A quoted value ("Tr0ub4dor&3x!", a subject line) is data for the call, not what the user asks for.
+  const asked = String(text || '').replace(/"[^"\n]{1,200}"|\u201c[^\u201d\n]{1,200}\u201d/g, ' ')
+    .replace(/\b(?:log|sign)(?:ged)?\s+(?:\S+\s+){0,2}?out\b/gi, ' logout ');
+  for (const tok of tokenize(asked)) {
     into.set(tok, Math.max(into.get(tok) || 0, weight));
     for (const syn of SYNONYMS[tok] || []) {
       const s = stem(syn);
@@ -242,9 +255,11 @@ function queryTerms(text, weight, into = new Map()) {
  * BM25 scores of every tool for a query (a string, or a `Map` term → weight).
  * Unless the query asks for a change (a write verb at weight ≥ 0.5), tools
  * whose names do not read are scaled by `writePrior`, so "show my unread mail"
- * prefers get_emails to set_email_properties. Tools that match nothing are left out.
+ * prefers get_emails to set_email_properties; when it does, readers are scaled by
+ * `readPrior` (their lookups come in through selectTools' companions). Tools that
+ * match nothing are left out.
  */
-export function rankTools(tools, query, { index = null, categoryOf = null, k1 = 1.2, b = 0.75, writePrior = 0.7 } = {}) {
+export function rankTools(tools, query, { index = null, categoryOf = null, k1 = 1.2, b = 0.75, writePrior = 0.7, readPrior = 0.85 } = {}) {
   const idx = index || buildToolIndex(tools, { categoryOf });
   const terms = query instanceof Map ? query : queryTerms(query, 1);
   const wantsChange = [...terms].some(([t, w]) => w >= 0.5 && WRITE_INTENT.has(t));
@@ -259,6 +274,7 @@ export function rankTools(tools, query, { index = null, categoryOf = null, k1 = 
       score += qw * idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * d.len / idx.avgLen));
     }
     if (score > 0 && !wantsChange && !READ_NAME.test(d.name)) score *= writePrior;
+    if (score > 0 && wantsChange && READ_NAME.test(d.name)) score *= readPrior;
     if (score > 0) out.push({ name: d.name, score });
   }
   out.sort((x, y) => y.score - x.score || (x.name < y.name ? -1 : 1));
@@ -275,24 +291,42 @@ function textOf(content) {
 /**
  * The retrieval query for a conversation: the latest user message in full, the
  * one before it at half weight (follow-ups like "and the second one?"), and the
- * latest assistant text lightly (it often names what comes next).
+ * latest assistant text lightly (it often names what comes next). With `index`,
+ * a latest message that matches no tool word ("yes, go ahead") gives the one
+ * before it nearly full weight. Quoted values are left out (they are data), and
+ * "email/mail …" used as a verb adds "send".
  */
-export function retrievalQuery(messages) {
+export function retrievalQuery(messages, { index = null } = {}) {
   const terms = new Map();
   const list = messages || [];
   let users = 0;
   let assistantSeen = false;
+  let latestMatched = true;
   for (let i = list.length - 1; i >= 0 && users < 2; i--) {
     const m = list[i];
     if (!m) continue;
-    if (m.role === 'user') queryTerms(textOf(m.content), users++ === 0 ? 1 : 0.5, terms);
-    else if (m.role === 'assistant' && !assistantSeen && textOf(m.content)) {
+    if (m.role === 'user') {
+      const text = textOf(m.content);
+      // A short reply that names no tool ("yes, go ahead", "the second one") leans on the request before it.
+      const weight = users === 0 ? 1 : latestMatched ? 0.5 : 0.9;
+      const before = new Map(terms);
+      queryTerms(text, weight, terms);
+      if (SEND_VERB.test(text)) terms.set('send', Math.max(terms.get('send') || 0, weight));
+      if (users === 0 && index) latestMatched = [...terms.keys()].some((t) => !before.has(t) && index.df.has(t));
+      users++;
+    } else if (m.role === 'assistant' && !assistantSeen && textOf(m.content)) {
       assistantSeen = true;
       queryTerms(textOf(m.content).slice(0, 1000), 0.3, terms);
     }
   }
   return terms;
 }
+
+/**
+ * "Email me…", "…and mail the list to…": email used as a verb at the start of a
+ * clause, followed by its object, which means send.
+ */
+const SEND_VERB = /(?:^|[.;!?,]\s*|\b(?:and|then|also|please)\s+)(?:e-?mail|mail|message)\s+(?:it|them|this|that|these|those|the|a|an|me|him|her|us|everyone|[\w.+-]+@[\w-]+\.)/i;
 
 /** Tool names called anywhere in the conversation, most recent first. */
 export function calledToolNames(messages) {
@@ -331,12 +365,16 @@ export function fuseRankings(rankings, { k = 60 } = {}) {
  *  - then the best BM25 matches until `k` tools are chosen. `rankings` are
  *    extra best-first name lists (e.g. an embedding ranker) fused with BM25 by
  *    reciprocal rank, for a hybrid ranker later;
+ *  - then, up to `maxTools`, the lookups of the first `companions` (default 3)
+ *    chosen tools: the lister of a required `…Id` argument (folderId → the
+ *    folder lister) and, for a tool that acts on one item, its category's finder
+ *    (reply_to_email → get_emails); `companions: 0` turns this off;
  *  - never more than `maxTools` (default k + 4) in all.
  *
  * With nothing to go on (no match at all) the first `k` tools are returned.
  */
 export function selectTools(tools, messages, {
-  k = DEFAULT_TOOL_K, maxTools = null, maxSticky = 6, always = null, rankings = null, categoryOf = null
+  k = DEFAULT_TOOL_K, maxTools = null, maxSticky = 6, always = null, rankings = null, categoryOf = null, companions = 3
 } = {}) {
   const list = (tools || []).filter((t) => toolInfo(t));
   const cap = maxTools || k + 4;
@@ -351,7 +389,7 @@ export function selectTools(tools, messages, {
   calledToolNames(messages).slice(0, maxSticky).forEach(take);
 
   const index = buildToolIndex(list, { categoryOf });
-  const query = retrievalQuery(messages);
+  const query = retrievalQuery(messages, { index });
   const lexical = rankTools(list, query, { index }).map((r) => r.name);
   const ranked = rankings && rankings.length ? fuseRankings([lexical, ...rankings]) : lexical;
 
@@ -373,8 +411,64 @@ export function selectTools(tools, messages, {
   for (const n of ranked) { if (chosen.length >= target) break; take(n); }
   if (!ranked.length) for (const t of list) { if (chosen.length >= k) break; take(toolInfo(t).name); }
 
+  // Lookups the chosen tools depend on, within the cap: the tool that lists a required
+  // id (folderId → the folder lister), and for a tool that changes things, the reader of
+  // its own category, to find what to act on (reply_to_email → get_emails).
+  if (companions && ranked.length) {
+    const lookups = companionTools(chosen.slice(0, companions), list, index, ranked, categoryOf);
+    for (const n of lookups) take(n);
+  }
+
   const keep = new Set(chosen);
   return list.filter((t) => keep.has(toolInfo(t).name));
+}
+
+/** A tool that reads a collection: list_*, search_*, or get_<plural> (get_emails, domain_get_users…). */
+const COLLECTION_NAME = /^(?:domain_)?(?:list|search)_|^(?:domain_)?get_(?:\w+_)?\w+s$/;
+/** Words in an id argument's name that say where, not what (srcFolderId, destFolderId). */
+const TOPIC_NOISE = new Set(['get', 'domain', 'by', 'info', 'type'].map(stem));
+const ITEM_ID = /^(?:uids?|ids?|guids?)$|(?:Ids?|ID|_ids?)$/;
+const ID_NOISE = new Set(['src', 'source', 'dest', 'destination', 'target', 'parent', 'new', 'old', 'from', 'to'].map(stem));
+
+/**
+ * Lookups for `names` (best first): for each, the collection reader whose name holds
+ * every word of a required `…Id` argument (folderId → list_folder_info_by_type), and,
+ * for a tool that changes or reads one item, the best-ranked collection reader of its
+ * category (or, without categories, of a noun in its name), which finds that item.
+ */
+function companionTools(names, list, index, ranked, categoryOf) {
+  const infos = new Map(list.map((t) => { const i = toolInfo(t); return [i.name, i]; }));
+  const cat = (n) => { const i = infos.get(n); return (i && (i.category || (categoryOf && categoryOf(n)))) || ''; };
+  // A finder lists or searches without needing an item first (a folder is a place, not an item).
+  const finder = (n) => {
+    const i = infos.get(n);
+    const req = (i && i.parameters && i.parameters.required) || [];
+    return COLLECTION_NAME.test(n) && READ_NAME.test(n) && !req.some((p) => ITEM_ID.test(p) && !/folder/i.test(p));
+  };
+  const readers = ranked.concat([...infos.keys()].filter((n) => !ranked.includes(n))).filter(finder);
+  const named = new Map(index.docs.map((d) => [d.name, new Set(tokenize(d.name))]));
+  // Same category; without categories, a noun in both names (move_emails, get_emails).
+  const nouns = (n) => [...(named.get(n) || [])].filter((w) => !WRITE_INTENT.has(w) && !READ_VERBS.has(w) && !TOPIC_NOISE.has(w));
+  const sameTopic = (a, b) => (cat(a) && cat(b) ? cat(a) === cat(b) : nouns(a).some((w) => nouns(b).includes(w)));
+  const out = [];
+  for (const n of names) {
+    const info = infos.get(n);
+    if (!info) continue;
+    const req = (info.parameters && info.parameters.required) || [];
+    for (const p of req) {
+      const m = /^(.+?)(?:Id|Ids|ID|_id|_ids)$/.exec(p);
+      if (!m) continue;
+      const words = tokenize(m[1]).filter((w) => !ID_NOISE.has(w));
+      if (!words.length) continue;
+      const hit = readers.find((r) => r !== n && words.every((w) => named.get(r) && named.get(r).has(w)));
+      if (hit && !out.includes(hit)) out.push(hit);
+    }
+    if (!finder(n)) {
+      const hit = readers.find((r) => r !== n && sameTopic(r, n));
+      if (hit && !out.includes(hit)) out.push(hit);
+    }
+  }
+  return out;
 }
 
 function hasArtifactStub(messages) {
@@ -919,7 +1013,7 @@ const REASONING = new WeakMap();
 
 /**
  * OpenAI messages → what LFM's template takes: tool_call arguments as objects
- * (the template refuses a JSON string), reasoning back on the current turn's
+ * (the template refuses a JSON string) without null values (it cannot print one), reasoning back on the current turn's
  * tool-call rounds (the template keeps <think> only after the last user
  * message, as the model was trained), everything else as is.
  */
@@ -935,6 +1029,8 @@ export function toTemplateMessages(messages, { preserveThinking = true } = {}) {
           let a = f.arguments;
           if (typeof a === 'string') { try { a = a.trim() ? JSON.parse(a) : {}; } catch { a = {}; } }
           if (!a || typeof a !== 'object' || Array.isArray(a)) a = {};
+          // The template cannot print a top-level null (`None` in the model's own syntax): leave it out.
+          a = Object.fromEntries(Object.entries(a).filter(([, v]) => v !== null && v !== undefined));
           return { id: c.id, type: 'function', function: { name: f.name || 'unknown', arguments: a } };
         });
         const r = preserveThinking ? REASONING.get(m.tool_calls) : null;
@@ -1165,6 +1261,8 @@ const newCallId = (n) => `call_local_${Date.now().toString(36)}_${(callSeq++).to
  *   k, maxTools     tool retrieval (selectTools); `always`, `categoryOf` passed through
  *   rankTools       optional async (messages, tools) => best-first names, fused with BM25
  *   contextTokens   prompt + output budget (default 16K); maxNewTokens (default 2048)
+ *   thinkBudget     reasoning tokens per round (default 1024); past it `</think>` is
+ *                   appended and the answer generated after it (0 = no limit)
  *   sampling        generate() options (default LOCAL_SAMPLING)
  *   toolNote        appended to the system prompt (default LOCAL_TOOL_NOTE; '' for none)
  *   isWrite         name => boolean, for the budget's elision (as runTurn's)
@@ -1189,6 +1287,7 @@ export function createLocalStream({
   rankTools: extraRanker = null,
   contextTokens = DEFAULT_CONTEXT_TOKENS,
   maxNewTokens = DEFAULT_MAX_NEW_TOKENS,
+  thinkBudget = DEFAULT_THINK_BUDGET,
   sampling = LOCAL_SAMPLING,
   toolNote = LOCAL_TOOL_NOTE,
   isWrite = null,
@@ -1197,9 +1296,14 @@ export function createLocalStream({
 } = {}) {
   if (typeof getModel !== 'function') throw new TypeError('createLocalStream needs getModel()');
   const rejected = new Map(); // name \0 canonical args → error, for the latest round
+  const failed = new Map();   // name \0 canonical args → its error, for the current user turn
+  let turnMark = null;
 
   async function stream({ messages, tools, signal, onContent, onReasoning, onToolCallProgress }) {
     rejected.clear();
+    // A new user message starts a new turn: earlier failures may succeed now.
+    const mark = userTurnMark(messages);
+    if (mark !== turnMark) { failed.clear(); turnMark = mark; }
     const empty = { content: '', reasoning: '', toolCalls: [], finishReason: null, usage: null, usageSummary: null, aborted: true };
     if (signal && signal.aborted) return empty;
 
@@ -1217,9 +1321,9 @@ export function createLocalStream({
     // 2. History that fits: estimate first, then the tokenizer's exact count.
     const promptBudget = Math.max(1024, contextTokens - maxNewTokens);
     const toolTokens = Math.ceil(JSON.stringify(templateTools).length / 3.2);
-    const render = (msgs) => tokenizer.apply_chat_template(
+    const render = (msgs, { tokenize = true } = {}) => tokenizer.apply_chat_template(
       toTemplateMessages(withToolNote(msgs, toolNote), { preserveThinking }),
-      { tools: templateTools.length ? templateTools : null, add_generation_prompt: true, return_dict: true }
+      { tools: templateTools.length ? templateTools : null, add_generation_prompt: true, ...(tokenize ? { return_dict: true } : { tokenize: false }) }
     );
     let budget = promptBudget;
     let fitted = fitToBudget(messages, { budget, extraTokens: toolTokens, isWrite });
@@ -1232,18 +1336,40 @@ export function createLocalStream({
       promptTokens = seqLength(inputs);
     }
 
-    // 3. Generate, streaming what may be shown.
+    // 3. Generate, streaming what may be shown. Reasoning gets `thinkBudget` tokens: past
+    // that, generation stops, `</think>` is appended and the answer is generated after it.
     const splitter = createOutputSplitter({ onContent, onReasoning, startInThink: true });
     let firstTokenAt = null;
     let lastToken = null;
-    const streamer = createTokenStreamer(tokenizer, (piece) => splitter.push(piece), {
-      onToken: (t) => { if (firstTokenAt === null) firstTokenAt = now(); lastToken = t; }
+    let shownText = '';
+    const onToken = (t) => { if (firstTokenAt === null) firstTokenAt = now(); lastToken = t; };
+    const streamer = createTokenStreamer(tokenizer, (piece) => { shownText += piece; splitter.push(piece); }, { onToken });
+    const thinking = () => !shownText.includes(THINK_CLOSE) && !shownText.includes(TOOL_CALL_START);
+    const thinkLimit = thinkBudget && thinkBudget < maxNewTokens ? thinkBudget : 0;
+    let cutThinking = false;
+    const stop = (ids) => ids.map(() => {
+      if (signal && signal.aborted) return true;
+      if (thinkLimit && streamer.ids.length >= thinkLimit && thinking()) { cutThinking = true; return true; }
+      return false;
     });
-    const stop = (ids) => ids.map(() => !!(signal && signal.aborted));
     const tGen = now();
     let genError = null;
+    let ids = null;
     try {
       await model.generate({ ...inputs, ...sampling, max_new_tokens: maxNewTokens, streamer, stopping_criteria: [stop] });
+      ids = streamer.ids.slice();
+      if (cutThinking && !(signal && signal.aborted)) {
+        const close = `\n${THINK_CLOSE}`;
+        splitter.push(close);
+        const prefix = render(fitted.messages, { tokenize: false });
+        const text = `${typeof prefix === 'string' ? prefix : ''}${tokenizer.decode(ids, { skip_special_tokens: false })}${close}`;
+        const more = tokenizer(text, { add_special_tokens: false, return_tensor: true });
+        const closeIds = tokenizer.encode(close, { add_special_tokens: false });
+        const rest = createTokenStreamer(tokenizer, (piece) => { shownText += piece; splitter.push(piece); }, { onToken });
+        const stopRest = (x) => x.map(() => !!(signal && signal.aborted));
+        await model.generate({ ...more, ...sampling, max_new_tokens: Math.max(64, maxNewTokens - ids.length), streamer: rest, stopping_criteria: [stopRest] });
+        ids = [...ids, ...closeIds, ...rest.ids];
+      }
     } catch (e) {
       genError = e;
     }
@@ -1252,8 +1378,8 @@ export function createLocalStream({
     splitter.end();
 
     const aborted = !!(signal && signal.aborted);
-    const completionTokens = streamer.ids.length;
-    const raw = tokenizer.decode(streamer.ids, { skip_special_tokens: false });
+    const completionTokens = (ids || streamer.ids).length;
+    const raw = tokenizer.decode(ids || streamer.ids, { skip_special_tokens: false });
     const eosIds = eosTokenIds(model, tokenizer);
     const hitLimit = !aborted && completionTokens >= maxNewTokens && !eosIds.has(String(lastToken));
 
@@ -1303,6 +1429,7 @@ export function createLocalStream({
       setupMs: tGen - t0,
       ttftMs: firstTokenAt !== null ? firstTokenAt - tGen : null,
       totalMs: tEnd - t0,
+      thinkingCut: cutThinking,
       tokensPerSecond: completionTokens > 1 && decodeMs > 0 ? (completionTokens - 1) / (decodeMs / 1000) : null,
       prefillTokensPerSecond: firstTokenAt !== null ? promptTokens / ((firstTokenAt - tGen) / 1000) : null,
       parseErrors: parsed.errors,
@@ -1323,32 +1450,54 @@ export function createLocalStream({
 
   /** Wrap runTurn's callTool / localTools so rejected calls are answered locally. */
   stream.guard = ({ callTool, localTools = null } = {}) => {
-    const check = (name, args) => rejected.get(rejectKey(name, args || {}));
+    const check = (name, args) => rejected.get(rejectKey(name, args || {})) || repeatError(name, args);
+    // A small model retries a failed call unchanged; the repeat is answered here, once per turn
+    // and call, with the first error, instead of failing the same way on the server again.
+    const run = async (name, args, fn) => {
+      const err = check(name, args);
+      if (err) return { isError: true, content: err };
+      const result = await fn();
+      if (result && result.isError) failed.set(rejectKey(name, args || {}), firstLine(result.content));
+      return result;
+    };
     const guarded = {
-      callTool: async (name, args) => {
-        const err = check(name, args);
-        return err ? { isError: true, content: err } : callTool(name, args);
-      },
+      callTool: (name, args) => run(name, args, () => callTool(name, args)),
       localTools: null
     };
     if (localTools) {
       guarded.localTools = {};
       for (const [n, fn] of Object.entries(localTools)) {
-        guarded.localTools[n] = async (args, call) => {
-          const err = check(n, args);
-          return err ? { isError: true, content: err } : fn(args, call);
-        };
+        guarded.localTools[n] = (args, call) => run(n, args, () => fn(args, call));
       }
     }
     return guarded;
   };
+  function repeatError(name, args) {
+    const prev = failed.get(rejectKey(name, args || {}));
+    return prev === undefined ? undefined
+      : `This exact call already failed in this turn: ${prev} Do not repeat it. Change the arguments, use a different tool, or tell the user what went wrong.`;
+  }
   /** The error a rejected call of the latest round will be answered with, or undefined. */
   stream.rejection = (name, args) => rejected.get(rejectKey(name, args || {}));
+  /** The answer a repeat of a call that already failed in this turn will get, or undefined. */
+  stream.repeatRejection = repeatError;
   stream.last = null;
   return stream;
 }
 
 const rejectKey = (name, args) => `${name}\u0000${canonicalJson(args)}`;
+
+/** The first line of a tool result, at most 300 characters. */
+function firstLine(content) {
+  const text = typeof content === 'string' ? content : JSON.stringify(content ?? null);
+  return text.split('\n')[0].slice(0, 300);
+}
+
+/** Identifies the current user turn: how many user messages, and the last one's text. */
+function userTurnMark(messages) {
+  const users = (messages || []).filter((m) => m && m.role === 'user');
+  return users.length ? `${users.length}\u0000${textOf(users[users.length - 1].content).slice(0, 200)}` : '';
+}
 
 function seqLength(inputs) {
   const ids = inputs && (inputs.input_ids || inputs);

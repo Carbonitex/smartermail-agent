@@ -102,7 +102,7 @@ test('each required call has a mock, and mocks return a result', () => {
       assert.ok(names(c.name).some(n => t.mocks[n]), `${t.id}: no mock for ${names(c.name).join(' | ')}`);
     }
     for (const [n, fn] of Object.entries(t.mocks)) {
-      const r = fn({ folderId: 'x', type: 1, uid: 1, domain: 'example.com', mailingListId: 'ml-101' });
+      const r = fn({ folderId: 'x', type: 1, uid: 1, domain: 'example.com', mailingListId: 101 });
       assert.notEqual(r, undefined, `${t.id}: mock ${n} returned undefined`);
     }
   }
@@ -146,7 +146,7 @@ test('every task\'s own ideal run scores as a pass (smoke: predicates accept wha
     'd-reset-password': trace([call('domain_update_user', { username: 'alice', password: 'N3w-Passw0rd#2026' })]),
     'd-spam-settings': trace([call('domain_get_spam_settings', {})], 'High spam is deleted at 15.'),
     'd-dkim-check': trace([call('domain_get_dkim', {})], 'Yes, DKIM is enabled and verified.'),
-    'd-mailing-lists': trace([call('domain_list_mailing_lists', {}), call('domain_get_mailing_list', { mailingListId: 'ml-101' })], 'team@example.com has 12 subscribers.'),
+    'd-mailing-lists': trace([call('domain_list_mailing_lists', {}), call('domain_get_mailing_list', { mailingListId: 101 })], 'team@example.com has 12 subscribers.'),
     'd-set-forwarding': trace([call('domain_set_mailbox_forwarding', { username: 'alice', forwardTo: 'alice.personal@example.org', deleteOnForward: false })]),
     'd-mailbox-unread': trace([call('get_emails', { folderId: 'Inbox', query: 'is:unread' })], 'Q3 budget is unread.'),
     'd-mailbox-send': trace([call('send_email', { to: 'alice@example.com', subject: 'Mailbox ready', body: 'Your mailbox is ready.' })]),
@@ -263,11 +263,20 @@ test('multi-account: a wrong account value fails, an omitted one passes', () => 
 
 /* ------------------------------------------------------------ neededTools, summarise */
 
+test('mailbox roles get the shared reads (folders, a message by uid) unless a task mocks them; sysadmin does not', () => {
+  const t = byId('u-flag');
+  assert.equal(mockResult(t, 'get_email_message', { uid: 3021 }).subject, 'Invoice 1042 for October');
+  assert.equal(mockResult(t, 'read_email_part', { uid: 1 }).isError, true);
+  assert.ok(Array.isArray(mockResult(t, 'list_folder_info_by_type', { type: 1 })));
+  assert.equal(mockResult(byId('s-list-domains'), 'get_email_message', { uid: 3021 }).isError, true);
+  assert.match(mockResult(byId('s-list-domains'), 'get_email_message', { uid: 3021 }).content, /Unexpected tool/);
+});
+
 test('neededTools and neededGroups', () => {
   assert.deepEqual([...neededTools(byId('u-move-to-folder'))].sort(), ['list_folder_info_by_type', 'move_emails']);
   assert.deepEqual([...neededTools(byId('u-search-sender'))].sort(), ['get_emails', 'search_items']);
   assert.equal(neededTools(byId('n-no-tools')).size, 0);
-  assert.deepEqual(neededGroups(byId('u-read-latest')), [['get_emails', 'search_items'], ['get_email_message']]);
+  assert.deepEqual(neededGroups(byId('u-read-latest')), [['get_emails', 'search_items'], ['get_email_message', 'read_email_part']]);
   const withAnyOf = { expect: { calls: [{ name: 'a' }], anyOf: [['b', 'c']] } };
   assert.deepEqual([...neededTools(withAnyOf)].sort(), ['a', 'b', 'c']);
   assert.deepEqual(neededGroups(withAnyOf), [['a'], ['b', 'c']]);
