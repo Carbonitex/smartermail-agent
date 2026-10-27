@@ -24,11 +24,11 @@
  */
 
 export const LOCAL_MODEL_PREFIX = 'local:';
-export const LOCAL_HUB_MODEL = 'LiquidAI/LFM2.5-2.6B-ONNX';
+export const LOCAL_HUB_MODEL = 'LiquidAI/LFM3-1.7B-ONNX';
 export const LOCAL_MODEL_ID = LOCAL_MODEL_PREFIX + LOCAL_HUB_MODEL;
-export const LOCAL_MODEL_NAME = 'Local · LFM2.5 2.6B (in-browser, experimental)';
-const SHORT_NAME = 'Local · LFM2.5 2.6B';
-const DOWNLOAD_NOTE = 'about 1.5–1.9 GB the first time, cached by the browser after';
+export const LOCAL_MODEL_NAME = 'Local · LFM3 1.7B (in-browser, experimental)';
+const SHORT_NAME = 'Local · LFM3 1.7B';
+const DOWNLOAD_NOTE = 'about 1.4–1.7 GB the first time, cached by the browser after';
 
 /** True for a picker value that names the in-browser model (never an OpenRouter id: those have no colon prefix). */
 export const isLocalModel = (id) => typeof id === 'string' && id.startsWith(LOCAL_MODEL_PREFIX);

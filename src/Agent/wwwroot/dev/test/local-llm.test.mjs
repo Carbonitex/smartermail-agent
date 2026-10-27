@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 
 import {
   tokenize, rankTools, selectTools, fuseRankings, calledToolNames, retrievalQuery, buildToolIndex,
-  parsePythonicCalls, parseJsonCalls, parseModelOutput,
+  parsePythonicCalls, parseJsonCalls, parseXmlCalls, parseModelOutput,
   coerceArguments, validateToolCall, toolsByName, canonicalJson,
   fitToBudget, estimateTokens, toTemplateMessages,
-  createOutputSplitter, createTokenStreamer, createLocalStream, loadLocalModel,
-  TOOL_CALL_START as S, TOOL_CALL_END as E, TRANSFORMERS_CDN_URL, TRANSFORMERS_VERSION
+  createOutputSplitter, createTokenStreamer, createLocalStream, loadLocalModel, bridgeLogitsToKeep,
+  TOOL_CALL_START as S, TOOL_CALL_END as E, TRANSFORMERS_CDN_URL, TRANSFORMERS_VERSION,
+  DEFAULT_LOCAL_MODEL, LOCAL_MODELS
 } from '../../js/local-llm.js';
 import { toolsToOpenAI, runTurn } from '../../js/llm.js';
 
@@ -200,6 +201,56 @@ test('parseJsonCalls: the usual JSON shapes, and an ordinary JSON answer is not 
   assert.equal(parseJsonCalls('{"name": "Bob", "email": "bob@example.com"}'), null);
   assert.equal(parseJsonCalls('not json'), null);
   assert.match(parseJsonCalls('{"name":"a","arguments":"{broken"}')[0].error, /not valid JSON/);
+});
+
+/** A call as LFM3's chat template renders one (values as text, non-strings JSON). */
+const xmlCall = (name, args = {}) => `<tool_call>\n<function=${name}>\n${Object.entries(args)
+  .map(([k, v]) => `<parameter=${k}>\n${typeof v === 'string' ? v : JSON.stringify(v)}\n</parameter>\n`).join('')}</function>\n</tool_call>`;
+
+test('parseXmlCalls: parameters as text, one newline either side dropped, several functions', () => {
+  const body = xmlCall('get_emails', { folderId: 'me/Inbox', take: 3, flags: ['a'] }).slice('<tool_call>'.length, -'</tool_call>'.length);
+  assert.deepEqual(parseXmlCalls(body), { calls: [{ name: 'get_emails', args: { folderId: 'me/Inbox', take: '3', flags: '["a"]' }, positional: [] }], error: null });
+  assert.deepEqual(parseXmlCalls('\n<function=list_folders>\n</function>\n').calls, [{ name: 'list_folders', args: {}, positional: [] }]);
+  const multi = parseXmlCalls('<function=a>\n<parameter=x>\n1\n</parameter>\n</function>\n<function=b>\n</function>');
+  assert.deepEqual(multi.calls.map((c) => [c.name, c.args]), [['a', { x: '1' }], ['b', {}]]);
+  // a multi-line value keeps its inner newlines
+  assert.equal(parseXmlCalls('<function=send_email>\n<parameter=body>\nHi,\n\nThanks\n</parameter>\n</function>').calls[0].args.body, 'Hi,\n\nThanks');
+});
+
+test('parseXmlCalls: lenient about missing closing tags, clear about garbage', () => {
+  assert.deepEqual(parseXmlCalls('<function=get_emails>\n<parameter=folderId>\nme/Inbox\n<parameter=take>\n3').calls[0].args, { folderId: 'me/Inbox', take: '3' });
+  assert.deepEqual(parseXmlCalls('<function = get_tasks >').calls.map((c) => c.name), ['get_tasks']);
+  assert.match(parseXmlCalls('get_emails please').error, /expected <function=name>/);
+  assert.match(parseXmlCalls('  ').error, /empty/);
+  assert.match(parseXmlCalls('oops <function=a></function>').error, /unexpected text before/);
+});
+
+test('parseModelOutput: LFM3 XML calls, coerced later; text around them; JSON inside <tool_call>', () => {
+  const r = parseModelOutput(`Need mail.</think>${xmlCall('get_emails', { folderId: 'me/Inbox', take: 3 })}<|im_end|>`);
+  assert.equal(r.reasoning, 'Need mail.');
+  assert.equal(r.content, '');
+  assert.deepEqual(r.calls, [{ name: 'get_emails', args: { folderId: 'me/Inbox', take: '3' }, positional: [] }]);
+  assert.deepEqual(r.errors, []);
+  // two calls, prose before and after, a call straight out of the thinking
+  const two = parseModelOutput(`x</think>Checking.${xmlCall('get_notes')}\n\n${xmlCall('get_tasks')} Done.`);
+  assert.deepEqual(two.calls.map((c) => c.name), ['get_notes', 'get_tasks']);
+  assert.equal(two.content, 'Checking.\n\n Done.');
+  assert.equal(parseModelOutput(`need tasks ${xmlCall('get_tasks')}`).reasoning, 'need tasks');
+  assert.deepEqual(parseModelOutput('x</think><tool_call>{"name":"get_notes","arguments":{}}</tool_call>').calls.map((c) => c.name), ['get_notes']);
+  assert.deepEqual(parseModelOutput('x</think><tool_call>[get_tasks()]</tool_call>').calls.map((c) => c.name), ['get_tasks']);
+  const cut = parseModelOutput('x</think><tool_call>\n<function=send_email>\n<parameter=to>\na@b.c');
+  assert.equal(cut.truncatedCall, true);
+  assert.deepEqual(cut.calls[0].args, { to: 'a@b.c' });
+  const bad = parseModelOutput('x</think><tool_call>send it</tool_call>');
+  assert.equal(bad.calls.length, 0);
+  assert.match(bad.errors[0], /Could not read the tool call "send it"/);
+});
+
+test('validateToolCall: XML text values coerced to the schema', () => {
+  const r = parseModelOutput(`x</think>${xmlCall('get_emails', { folderId: 'me/Inbox', take: 5 })}`);
+  const v = validateToolCall(r.calls[0], toolsByName(TOOLS));
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.args, { folderId: 'me/Inbox', take: 5 });
 });
 
 test('parseModelOutput: reasoning, the native call, and the text around it', () => {
@@ -401,6 +452,23 @@ test('output splitter: reasoning and content apart, markup never shown, one char
   assert.ok(!content.join('').includes('tool_call'));
 });
 
+test('output splitter: LFM3 XML calls are never shown, whatever the piece size', () => {
+  for (const size of [1, 3, 7]) {
+    const content = [];
+    const reasoning = [];
+    const s = createOutputSplitter({ onContent: (c) => content.push(c), onReasoning: (r) => reasoning.push(r) });
+    const r = feed(s, `Look first.</think>Checking.${xmlCall('get_emails', { folderId: 'x' })} Done.`, size);
+    assert.equal(reasoning.join(''), 'Look first.');
+    assert.equal(r.content, 'Checking. Done.');
+    assert.equal(r.deferred, false);
+    // and straight out of the thinking
+    const t = createOutputSplitter({ onReasoning: (x) => reasoning.push(x) });
+    reasoning.length = 0;
+    assert.equal(feed(t, `need tasks${xmlCall('get_tasks')}`, size).content, '');
+    assert.equal(reasoning.join(''), 'need tasks');
+  }
+});
+
 test('output splitter: an answer that opens like JSON is held for the parser', () => {
   const content = [];
   const s = createOutputSplitter({ onContent: (c) => content.push(c) });
@@ -574,6 +642,29 @@ test('createLocalStream + runTurn: an invalid call is answered locally and the m
   assert.equal(messages[messages.length - 1].content, 'Two emails.');
 });
 
+test('createLocalStream: an LFM3 XML call becomes OpenAI tool_calls, coerced, nothing shown', async () => {
+  const rt = fakeRuntime([`Need mail.</think>${xmlCall('get_emails', { folderId: 'me/Inbox', take: 3 })}`]);
+  const stream = createLocalStream({ getModel: async () => rt });
+  const shown = [];
+  const turn = await stream({ messages: [user('show my inbox')], tools: TOOLS, onContent: (c) => shown.push(c) });
+  assert.equal(turn.finishReason, 'tool_calls');
+  assert.deepEqual(turn.toolCalls.map((c) => [c.function.name, JSON.parse(c.function.arguments)]), [['get_emails', { folderId: 'me/Inbox', take: 3 }]]);
+  assert.deepEqual(shown, []);
+});
+
+test('createLocalStream: the retry hint names the model\'s own call syntax', async () => {
+  const hint = async (modelId, output) => {
+    const rt = fakeRuntime([output]);
+    const stream = createLocalStream({ getModel: async () => ({ ...rt, modelId }) });
+    const turn = await stream({ messages: [user('inbox')], tools: TOOLS });
+    return stream.rejection(turn.toolCalls[0].function.name, {});
+  };
+  assert.match(await hint('LiquidAI/LFM3-1.7B-ONNX', 'x</think><tool_call>get mail</tool_call>'), /Write tool calls as <tool_call><function=tool_name>/);
+  assert.match(await hint('LiquidAI/LFM2.5-2.6B-ONNX', `x</think>${S}[get_emails(folderId="me)]${E}`), /Write tool calls as \[tool_name\(/);
+  // unknown model: the syntax its output tried
+  assert.match(await hint(undefined, 'x</think><tool_call>get mail</tool_call>'), /<function=tool_name>/);
+});
+
 test('createLocalStream: unreadable call markup becomes an error round, not a crash', async () => {
   const rt = fakeRuntime([`x</think>${S}[get_emails(folderId="me/Inbox)]${E}`, 'x</think>Sorry.']);
   const stream = createLocalStream({ getModel: async () => rt });
@@ -705,11 +796,34 @@ test('loadLocalModel: uses the injected runtime; the CDN URL is pinned to an exa
     AutoModelForCausalLM: { from_pretrained: async (id, o) => { seen.push(['model', id, o.dtype, o.device]); return { dispose: () => seen.push(['dispose']) }; } }
   };
   const m = await loadLocalModel({ transformers: tf });
-  assert.deepEqual(seen, [['tok', 'LiquidAI/LFM2.5-2.6B-ONNX'], ['model', 'LiquidAI/LFM2.5-2.6B-ONNX', 'q4', 'cpu']]);
+  assert.equal(DEFAULT_LOCAL_MODEL, 'LiquidAI/LFM3-1.7B-ONNX');
+  assert.ok(LOCAL_MODELS[DEFAULT_LOCAL_MODEL]);
+  assert.deepEqual(seen, [['tok', DEFAULT_LOCAL_MODEL], ['model', DEFAULT_LOCAL_MODEL, 'q4', 'cpu']]);
   assert.equal(m.device, 'cpu');
   m.dispose();
   assert.match(TRANSFORMERS_VERSION, /^\d+\.\d+\.\d+$/);
   assert.ok(TRANSFORMERS_CDN_URL.includes(`@${TRANSFORMERS_VERSION}/`));
+});
+
+test('bridgeLogitsToKeep: adds logits_to_keep = [1] only for a graph that wants it', async () => {
+  class Tensor { constructor(type, data, dims) { Object.assign(this, { type, data, dims }); } }
+  const make = (inputNames) => {
+    const got = [];
+    return { got, model: { sessions: { model: { inputNames } }, forward: async (inputs) => { got.push(inputs); return 'out'; } } };
+  };
+  const lfm3 = make(['input_ids', 'attention_mask', 'logits_to_keep']);
+  assert.equal(bridgeLogitsToKeep(lfm3.model, { Tensor }), true);
+  assert.equal(await lfm3.model.forward({ input_ids: 1 }), 'out');
+  assert.deepEqual(lfm3.got[0].logits_to_keep, new Tensor('int64', [1n], [1]));
+  await lfm3.model.forward({ input_ids: 1, logits_to_keep: 'mine' });
+  assert.equal(lfm3.got[1].logits_to_keep, 'mine');
+  for (const names of [['input_ids'], ['logits_to_keep', 'num_logits_to_keep']]) {
+    const other = make(names);
+    const forward = other.model.forward;
+    assert.equal(bridgeLogitsToKeep(other.model, { Tensor }), false);
+    assert.equal(other.model.forward, forward);
+  }
+  assert.equal(bridgeLogitsToKeep({ dispose() {} }, { Tensor }), false);
 });
 
 test('loadLocalModel: in a browser without WebGPU it says so', async () => {
