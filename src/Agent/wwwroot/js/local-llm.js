@@ -10,19 +10,31 @@
  *  - tool retrieval: the agent offers up to ~250 tools (10–25K+ tokens of
  *    schema); a small model gets the top `k` for the conversation (BM25 over
  *    names, descriptions and categories), plus every tool already called;
- *  - its native tool-call format, parsed into OpenAI `tool_calls`;
+ *  - the model's native tool-call format, parsed into OpenAI `tool_calls`;
  *  - argument coercion and validation against the tool's JSON schema, with
  *    invalid calls answered locally as an error the model can retry from;
  *  - a context budget (default 16K tokens) instead of a 128K+ window.
  *
- * Default model: LiquidAI LFM2.5-2.6B (ONNX, q4 / q4f16). It is a reasoning
- * model: its chat template opens every answer with `<think>`, and it calls tools
- * as a Python list between special markers:
+ * Default model: LiquidAI LFM3-1.7B (ONNX, q4 / q4f16); LFM2.5-2.6B still
+ * works (LOCAL_MODELS). Both are reasoning models: the chat template opens every
+ * answer with `<think>`. LFM3 calls tools in XML, one <tool_call> per call, every
+ * value as text (non-strings JSON-encoded):
+ *
+ *   <think>…</think><tool_call>
+ *   <function=get_emails>
+ *   <parameter=folderId>
+ *   a@b.c/Inbox
+ *   </parameter>
+ *   </function>
+ *   </tool_call>
+ *
+ * LFM2.5 writes a Python list between special markers:
  *
  *   <think>…</think><|tool_call_start|>[get_emails(folderId='a@b.c/Inbox', take=5)]<|tool_call_end|>
  *
- * Bare JSON calls (`{"name":…,"arguments":{…}}`, `<tool_call>…</tool_call>`)
- * are accepted too, for prompts or other models that produce them.
+ * The parser reads either, whatever the model. Bare JSON calls
+ * (`{"name":…,"arguments":{…}}`, `<tool_call>{…}</tool_call>`) are accepted
+ * too, for prompts or other models that produce them.
  *
  * Public API (everything else is internal):
  *
@@ -38,6 +50,7 @@
  *   rankTools(tools, query, { … })           → [{ name, score }], best first
  *   parseModelOutput(text, { tools })        → { content, reasoning, calls, errors }
  *   parsePythonicCalls(text)                 → { calls, error }
+ *   parseXmlCalls(text)                      → { calls, error }
  *   coerceArguments(args, schema)            → { value, errors, notes }
  *   validateToolCall(call, toolsByName)      → { ok, name, args, error }
  *   fitToBudget(messages, { budget, … })     → { messages, tokens, steps, overBudget }
@@ -55,8 +68,23 @@
 import { normaliseUsage, elideOldToolResults, clampToolResult } from './llm.js';
 import { isArtifactStub } from './artifacts.js';
 
-export const DEFAULT_LOCAL_MODEL = 'LiquidAI/LFM2.5-2.6B-ONNX';
-export const TRANSFORMERS_VERSION = '4.3.1';
+/**
+ * Models known to work, by Hugging Face id. `callSyntax` is how a retry hint
+ * tells the model to write a call; the parser reads every format regardless.
+ */
+export const LOCAL_MODELS = Object.freeze({
+  'LiquidAI/LFM3-1.7B-ONNX': Object.freeze({
+    name: 'LFM3 1.7B',
+    callSyntax: '<tool_call><function=tool_name><parameter=arg>value</parameter></function></tool_call>'
+  }),
+  'LiquidAI/LFM2.5-2.6B-ONNX': Object.freeze({
+    name: 'LFM2.5 2.6B',
+    callSyntax: '[tool_name(arg="value", other=2)]'
+  })
+});
+export const DEFAULT_LOCAL_MODEL = 'LiquidAI/LFM3-1.7B-ONNX';
+/** 4.3.2 is the first release with the `lfm3` architecture. */
+export const TRANSFORMERS_VERSION = '4.3.2';
 /** Self-contained browser build (onnxruntime-web bundled; its wasm comes from the same CDN). */
 export const TRANSFORMERS_CDN_URL = `https://cdn.jsdelivr.net/npm/@huggingface/transformers@${TRANSFORMERS_VERSION}/dist/transformers.min.js`;
 
@@ -66,14 +94,30 @@ export const DEFAULT_TOOL_K = 8;
 /** Reasoning tokens per round before `</think>` is forced (0 = no limit). */
 export const DEFAULT_THINK_BUDGET = 1024;
 
-/** The model card's recommended sampling (LFM2.5-2.6B generation_config.json). */
+/** The model cards' recommended sampling for tool use (LFM3-1.7B and LFM2.5-2.6B agree). */
 export const LOCAL_SAMPLING = Object.freeze({ do_sample: true, temperature: 0.1, top_k: 50, repetition_penalty: 1.1 });
 
 /** Appended to the system prompt: the model only ever sees a subset of the tools. */
 export const LOCAL_TOOL_NOTE = 'Only the tools in the list below are available right now. Call them by their exact names with the argument names from their schemas. If none of them fits the request, say so instead of guessing. A general question that needs nothing from the mail server is answered directly, without a tool. When a tool fails, do not repeat the same call: fix the arguments, try another tool, or explain the problem.';
 
+/** LFM2.5's markers around a pythonic call list. */
 export const TOOL_CALL_START = '<|tool_call_start|>';
 export const TOOL_CALL_END = '<|tool_call_end|>';
+/** LFM3's tags around one XML call (and the usual wrapper of a JSON call). */
+export const XML_CALL_START = '<tool_call>';
+export const XML_CALL_END = '</tool_call>';
+const CALL_MARKERS = [[TOOL_CALL_START, TOOL_CALL_END], [XML_CALL_START, XML_CALL_END]];
+const CALL_STARTS = CALL_MARKERS.map(([s]) => s);
+
+/** The earliest call marker in `text` from `from`: { index, start, end }, or null. */
+function findCallStart(text, from = 0) {
+  let best = null;
+  for (const [start, end] of CALL_MARKERS) {
+    const index = text.indexOf(start, from);
+    if (index >= 0 && (!best || index < best.index)) best = { index, start, end };
+  }
+  return best;
+}
 const THINK_OPEN = '<think>';
 const THINK_CLOSE = '</think>';
 
@@ -651,6 +695,57 @@ class PyParser {
   }
 }
 
+/* ---------------------------------------------------------- XML tool calls */
+
+/**
+ * Parse LFM3's XML call, the text between <tool_call> and </tool_call>:
+ *
+ *   <function=name>
+ *   <parameter=key>
+ *   value
+ *   </parameter>
+ *   </function>
+ *
+ * Values are text, as the template writes them: strings raw, anything else
+ * JSON (`3`, `true`, `["a"]`); coerceArguments turns them into what the schema
+ * asks for. One newline either side of a value is the template's and is
+ * dropped. Lenient where a small model slips: several functions in one block,
+ * a missing </parameter> or </function> (the next tag or the end closes it),
+ * spaces around names. A repeated parameter keeps the last value.
+ *
+ * @returns {{calls: Array<{name:string, args:object, positional:Array}>, error: string|null}}
+ */
+export function parseXmlCalls(text) {
+  const src = String(text || '');
+  const calls = [];
+  const fnRe = /<function\s*=\s*([^>\s]+)\s*>/g;
+  const heads = [...src.matchAll(fnRe)];
+  if (!heads.length) {
+    return { calls, error: src.trim() ? 'expected <function=name> in the tool call' : 'the tool call is empty' };
+  }
+  const stray = src.slice(0, heads[0].index).trim();
+  if (stray) return { calls, error: `unexpected text before <function=…>: ${JSON.stringify(stray.slice(0, 60))}` };
+  for (let n = 0; n < heads.length; n++) {
+    const from = heads[n].index + heads[n][0].length;
+    const until = n + 1 < heads.length ? heads[n + 1].index : src.length;
+    let body = src.slice(from, until);
+    const close = body.indexOf('</function>');
+    if (close >= 0) body = body.slice(0, close);
+    const args = {};
+    const params = [...body.matchAll(/<parameter\s*=\s*([^>\s]+)\s*>/g)];
+    for (let i = 0; i < params.length; i++) {
+      const vFrom = params[i].index + params[i][0].length;
+      const vUntil = i + 1 < params.length ? params[i + 1].index : body.length;
+      let value = body.slice(vFrom, vUntil);
+      const end = value.indexOf('</parameter>');
+      if (end >= 0) value = value.slice(0, end);
+      args[params[i][1]] = value.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+    }
+    calls.push({ name: heads[n][1], args, positional: [] });
+  }
+  return { calls, error: null };
+}
+
 /* ------------------------------------------------------------ JSON tool calls */
 
 /**
@@ -718,7 +813,8 @@ export function parseModelOutput(text, { startInThink = true, tools = null } = {
   if (startInThink || opens) {
     if (opens) rest = rest.trimStart().slice(THINK_OPEN.length);
     const close = rest.indexOf(THINK_CLOSE);
-    const call = rest.indexOf(TOOL_CALL_START);
+    const found = findCallStart(rest);
+    const call = found ? found.index : -1;
     if (close >= 0 && (call < 0 || close < call)) {
       reasoning = rest.slice(0, close);
       rest = rest.slice(close + THINK_CLOSE.length);
@@ -736,24 +832,25 @@ export function parseModelOutput(text, { startInThink = true, tools = null } = {
   let truncatedCall = false;
   let i = 0;
   for (;;) {
-    const s = rest.indexOf(TOOL_CALL_START, i);
-    if (s < 0) { content += rest.slice(i); break; }
+    const found = findCallStart(rest, i);
+    if (!found) { content += rest.slice(i); break; }
+    const s = found.index;
     content += rest.slice(i, s);
-    const e = rest.indexOf(TOOL_CALL_END, s + TOOL_CALL_START.length);
-    const body = rest.slice(s + TOOL_CALL_START.length, e < 0 ? rest.length : e);
+    const e = rest.indexOf(found.end, s + found.start.length);
+    const body = rest.slice(s + found.start.length, e < 0 ? rest.length : e);
     if (e < 0) truncatedCall = true;
     const fromJson = /^\s*[[{]\s*["{]/.test(body) ? parseJsonCalls(body) : null;
     if (fromJson) calls.push(...fromJson);
     else {
-      const r = parsePythonicCalls(body);
+      const r = /^\s*<function\s*=/.test(body) ? parseXmlCalls(body) : parsePythonicCalls(body);
       calls.push(...r.calls);
       if (r.error) errors.push(`Could not read the tool call ${JSON.stringify(body.trim().slice(0, 200))}: ${r.error}`);
     }
     if (e < 0) break;
-    i = e + TOOL_CALL_END.length;
+    i = e + found.end.length;
   }
 
-  content = content.replace(/<\/?think>/g, '').replace(/<\|tool_call_(?:start|end)\|>/g, '').trim();
+  content = content.replace(/<\/?think>/g, '').replace(/<\|tool_call_(?:start|end)\|>|<\/?tool_call>/g, '').trim();
 
   // No native calls: the whole answer may still be a call in JSON or bare pythonic form.
   if (!calls.length && content) {
@@ -1163,15 +1260,16 @@ export function createTokenStreamer(tokenizer, onText, { onToken = null } = {}) 
 
 /**
  * What of the raw output may be shown while it streams: reasoning to
- * `onReasoning`, answer text to `onContent`, tool-call markup to neither. Text
- * that might be the start of a marker is held until it is not. An answer that
- * opens like a JSON call (`{`, `[`, a fence, <tool_call>) is held to the end,
- * where parseModelOutput decides; the caller then emits what is left.
+ * `onReasoning`, answer text to `onContent`, tool-call markup (either model's
+ * markers) to neither. Text that might be the start of a marker is held until
+ * it is not. An answer that opens like a bare JSON or pythonic call (`{`, `[`,
+ * a fence) is held to the end, where parseModelOutput decides; the caller then
+ * emits what is left.
  */
 export function createOutputSplitter({ onContent = null, onReasoning = null, startInThink = true } = {}) {
   let phase = startInThink ? 'think' : 'content';
   let pending = '';
-  let inCall = false;
+  let inCall = null; // the end marker of the call being skipped
   let deferred = false;
   let content = '';
   let reasoning = '';
@@ -1204,7 +1302,8 @@ export function createOutputSplitter({ onContent = null, onReasoning = null, sta
       if (phase === 'think') {
         if (!reasoning && pending.trimStart().startsWith(THINK_OPEN)) pending = pending.trimStart().slice(THINK_OPEN.length);
         const close = pending.indexOf(THINK_CLOSE);
-        const call = pending.indexOf(TOOL_CALL_START);
+        const found = findCallStart(pending);
+        const call = found ? found.index : -1;
         if (close >= 0 && (call < 0 || close < call)) {
           emitReasoning(pending.slice(0, close));
           pending = pending.slice(close + THINK_CLOSE.length);
@@ -1212,28 +1311,27 @@ export function createOutputSplitter({ onContent = null, onReasoning = null, sta
           continue;
         }
         if (call >= 0) { emitReasoning(pending.slice(0, call)); pending = pending.slice(call); phase = 'content'; continue; }
-        const hold = final ? 0 : holdFor(pending, [THINK_CLOSE, TOOL_CALL_START, THINK_OPEN]);
+        const hold = final ? 0 : holdFor(pending, [THINK_CLOSE, ...CALL_STARTS, THINK_OPEN]);
         emitReasoning(pending.slice(0, pending.length - hold));
         pending = pending.slice(pending.length - hold);
         return;
       }
       if (inCall) {
-        const e = pending.indexOf(TOOL_CALL_END);
+        const e = pending.indexOf(inCall);
         if (e < 0) { if (final) pending = ''; return; }
-        pending = pending.slice(e + TOOL_CALL_END.length);
-        inCall = false;
+        pending = pending.slice(e + inCall.length);
+        inCall = null;
         continue;
       }
       if (deferred) return;
       if (!started) {
         const t = pending.trimStart();
-        if (/^(?:[{[]|```|<tool_call>)/.test(t)) { deferred = true; return; }
+        if (/^(?:[{[]|```)/.test(t)) { deferred = true; return; }
         if (!t && !final) return;
-        if (t.length < 11 && '<tool_call>'.startsWith(t) && !final) return;
       }
-      const s = pending.indexOf(TOOL_CALL_START);
-      if (s >= 0) { emitContent(pending.slice(0, s)); pending = pending.slice(s + TOOL_CALL_START.length); inCall = true; continue; }
-      const hold = final ? 0 : holdFor(pending, [TOOL_CALL_START, THINK_CLOSE]);
+      const found = findCallStart(pending);
+      if (found) { emitContent(pending.slice(0, found.index)); pending = pending.slice(found.index + found.start.length); inCall = found.end; continue; }
+      const hold = final ? 0 : holdFor(pending, [...CALL_STARTS, THINK_CLOSE]);
       emitContent(pending.slice(0, pending.length - hold).replace(/<\/?think>/g, ''));
       pending = pending.slice(pending.length - hold);
       return;
@@ -1308,7 +1406,7 @@ export function createLocalStream({
     if (signal && signal.aborted) return empty;
 
     const t0 = now();
-    const { model, tokenizer } = await getModel();
+    const { model, tokenizer, modelId } = await getModel();
     if (signal && signal.aborted) return empty;
 
     // 1. Tools for this round.
@@ -1344,7 +1442,7 @@ export function createLocalStream({
     let shownText = '';
     const onToken = (t) => { if (firstTokenAt === null) firstTokenAt = now(); lastToken = t; };
     const streamer = createTokenStreamer(tokenizer, (piece) => { shownText += piece; splitter.push(piece); }, { onToken });
-    const thinking = () => !shownText.includes(THINK_CLOSE) && !shownText.includes(TOOL_CALL_START);
+    const thinking = () => !shownText.includes(THINK_CLOSE) && !findCallStart(shownText);
     const thinkLimit = thinkBudget && thinkBudget < maxNewTokens ? thinkBudget : 0;
     let cutThinking = false;
     const stop = (ids) => ids.map(() => {
@@ -1398,7 +1496,7 @@ export function createLocalStream({
       // Unreadable call markup with no call recovered: answer it as an error round.
       if (!toolCalls.length && parsed.errors.length) {
         const call = { id: newCallId(0), type: 'function', function: { name: 'invalid_tool_call', arguments: '{}' } };
-        rejected.set(rejectKey('invalid_tool_call', {}), `${parsed.errors.join(' ')} Write tool calls as [tool_name(arg="value", other=2)].`);
+        rejected.set(rejectKey('invalid_tool_call', {}), `${parsed.errors.join(' ')} Write tool calls as ${callSyntaxFor(modelId, raw)}.`);
         toolCalls.push(call);
       }
     }
@@ -1485,6 +1583,14 @@ export function createLocalStream({
   return stream;
 }
 
+/** How to tell this model to write a call: its own syntax, else the one its output tried. */
+function callSyntaxFor(modelId, raw) {
+  const known = modelId && LOCAL_MODELS[modelId];
+  if (known) return known.callSyntax;
+  const xml = String(raw || '').includes(XML_CALL_START);
+  return LOCAL_MODELS[xml ? 'LiquidAI/LFM3-1.7B-ONNX' : 'LiquidAI/LFM2.5-2.6B-ONNX'].callSyntax;
+}
+
 const rejectKey = (name, args) => `${name}\u0000${canonicalJson(args)}`;
 
 /** The first line of a tool result, at most 300 characters. */
@@ -1553,6 +1659,7 @@ export async function loadLocalModel({
   const progress_callback = onProgress || undefined;
   const tokenizer = await tf.AutoTokenizer.from_pretrained(modelId, { progress_callback });
   const model = await tf.AutoModelForCausalLM.from_pretrained(modelId, { dtype: dt, device: dev, progress_callback });
+  bridgeLogitsToKeep(model, tf);
   return {
     model,
     tokenizer,
@@ -1562,4 +1669,24 @@ export async function loadLocalModel({
     loadMs: Date.now() - t0,
     dispose: () => (model && typeof model.dispose === 'function' ? model.dispose() : undefined)
   };
+}
+
+/**
+ * LFM3's ONNX export names the input `logits_to_keep`; Transformers.js (4.3.2)
+ * only fills `num_logits_to_keep`, so generate() fails with "Missing the
+ * following inputs: logits_to_keep". Supply it as 1: generation reads only the
+ * last position, and all logits of a 16K prompt over a 128K vocabulary would
+ * be gigabytes. A no-op for graphs without that input.
+ */
+export function bridgeLogitsToKeep(model, tf) {
+  const sessions = (model && model.sessions) || {};
+  const session = sessions.model || sessions.decoder_model_merged;
+  const names = (session && session.inputNames) || [];
+  if (!names.includes('logits_to_keep') || names.includes('num_logits_to_keep') || typeof model.forward !== 'function') return false;
+  const forward = model.forward.bind(model);
+  model.forward = (inputs, ...rest) => forward(
+    inputs && inputs.logits_to_keep ? inputs : { ...inputs, logits_to_keep: new tf.Tensor('int64', [1n], [1]) },
+    ...rest
+  );
+  return true;
 }

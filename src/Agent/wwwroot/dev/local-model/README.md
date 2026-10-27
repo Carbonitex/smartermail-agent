@@ -1,8 +1,17 @@
 # Testing the in-browser model in the chat (experimental)
 
 The chat can run a small model on your own machine instead of an OpenRouter model:
-LiquidAI LFM2.5 2.6B through Transformers.js on WebGPU (`js/local-llm.js`), wired into the
-UI by `js/local-model-ui.js`. No OpenRouter key is needed for it.
+LiquidAI LFM3 1.7B through Transformers.js (4.3.2 or later: the first with the `lfm3`
+architecture) on WebGPU (`js/local-llm.js`), wired into the UI by `js/local-model-ui.js`. No
+OpenRouter key is needed for it. LFM2.5 2.6B, the first model tried, still works
+(`LOCAL_MODELS`; `node eval.mjs --model LiquidAI/LFM2.5-2.6B-ONNX`).
+
+The two write tool calls differently, and `parseModelOutput` reads both whatever the model: LFM3 one
+XML block per call (`<tool_call><function=…><parameter=…>…</parameter></function></tool_call>`,
+every value as text, coerced to the schema afterwards), LFM2.5 a Python list between
+`<|tool_call_start|>` and `<|tool_call_end|>`. LFM3's ONNX graph also wants a `logits_to_keep`
+input that Transformers.js does not fill (it only knows `num_logits_to_keep`); `loadLocalModel`
+supplies it (`bridgeLogitsToKeep`).
 
 ## What you need
 
@@ -47,11 +56,11 @@ in-browser model box (or paste a key and pick the model later from the picker).
 
 ## What to look for
 
-- **Picker**: "Local · LFM2.5 2.6B (in-browser, experimental)" is the first entry. Switching to an
+- **Picker**: "Local · LFM3 1.7B (in-browser, experimental)" is the first entry. Switching to an
   OpenRouter model without a key shows a key field under the header; sending without one is refused
   with a notice. Switching back and forth keeps the conversation.
 - **Loading**: the bar under the header has **Load model**, or the first message loads it. The first
-  load downloads ~1.5–1.9 GB with a progress bar; later loads come from the browser cache in seconds.
+  load downloads ~1.4–1.7 GB with a progress bar; later loads come from the browser cache in seconds.
   "Ready · webgpu · q4f16" (or `q4` on a GPU without `shader-f16`) when done. **Unload** frees the
   GPU memory; the download stays cached.
 - **Each round**: a collapsed **Thinking** block above the answer (the model's `<think>` text, never
@@ -66,8 +75,14 @@ in-browser model box (or paste a key and pick the model later from the picker).
   card under its tool card (tool, account, every argument in full, hidden characters marked) with
   **Approve** / **Deny**; destructive tools get a red card. Deny (or **Stop** while the card waits)
   sends nothing to the server and tells the model the user declined and not to retry. In the eval,
-  LFM2.5 made writes without asking in 32 of 32 runs, whatever the prompt said. OpenRouter models
-  are not gated this way.
+  LFM2.5 made writes without asking in 32 of 32 runs, whatever the prompt said; LFM3 in 23 of 32.
+  OpenRouter models are not gated this way.
+- **Eval** (`eval.mjs`, 37 tasks × 2, k=8, thinking budget 1024, q4f16 on WebGPU, M4 Max): LFM3 1.7B
+  85% (reads 94%, writes 72%), LFM2.5 2.6B 89% (reads 91%, writes 88%). LFM3 writes far fewer
+  invalid calls (4 vs 25 answered locally) and starts answering sooner (median 0.9 s vs 1.3 s to the
+  first token). Several of its write misses are tools whose schemas mark optional fields required
+  (`new_or_update_calendar_event`, `new_or_update_task`): LFM3 asks the user for them, LFM2.5
+  invents them.
 - **Scheduled tasks** never offer the in-browser model: a new task starts from the default OpenRouter
   model, and saving one with a `local:` model is refused.
 

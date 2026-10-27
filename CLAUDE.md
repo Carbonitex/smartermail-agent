@@ -266,7 +266,7 @@ wwwroot/                      the browser UI (owned by the frontend; wwwroot/dev
   js/profile-ui.js            passkey panel, "save to a profile" offer, Profile menu, recovery-code dialog
   js/tasks.js                 the Tasks dialog: list, editor (cron presets), runs, transcript viewer
   js/admin-ui.js              the Profile menu's "Invites (admin)" section (ADMIN_PROFILES)
-  js/local-llm.js             EXPERIMENTAL in-browser model (LFM2.5-2.6B, Transformers.js/WebGPU): tool
+  js/local-llm.js             EXPERIMENTAL in-browser model (LFM3-1.7B, Transformers.js/WebGPU): tool
                               retrieval, native tool-call parsing, validation, context budget; a
                               `streamImpl` drop-in for runTurn. Eval harness: wwwroot/dev/local-model/
   js/local-model-ui.js        its picker entry, load bar, stats/debug view and the write gate (every

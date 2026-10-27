@@ -7,7 +7,7 @@
  *   node smoke.mjs --tools fixtures/tools-user.json  # retrieval over a real tool list
  *   node smoke.mjs --only 2 --max-new 1024
  *
- * The first run downloads the model (~1.9 GB for q4) into Transformers.js's
+ * The first run downloads the model (~1.6 GB for q4, 1.4 GB for q4f16) into Transformers.js's
  * cache under node_modules. Prints, per round: the raw model output, the parsed
  * tool calls, prompt tokens, time to first token and decode speed; per prompt:
  * the final answer.
