@@ -29,7 +29,7 @@ RUN dotnet test tests/Agent.Tests/SmarterMailAgent.Tests.csproj -c Release
 ARG VERSION=0.0.0-dev
 RUN dotnet publish src/Agent/SmarterMailAgent.csproj -c Release -o /app -p:Version=$VERSION -p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:11.0
 WORKDIR /app
 COPY --from=build /app .
 # wwwroot is published by the SDK (Content items), minus wwwroot/dev which is excluded
