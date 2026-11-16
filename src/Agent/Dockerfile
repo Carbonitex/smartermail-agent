@@ -1,7 +1,7 @@
 # Build context is the repo root: docker buildx build -f src/Agent/Dockerfile .
 # The build stage runs natively ($BUILDPLATFORM) even for multi-arch builds: the publish output is
 # framework-dependent IL, identical for every architecture, so only the runtime stage is per-arch.
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 WORKDIR /src
 
 # Restore layer: cached until a project file, package version or feed changes. Only an optimisation —
