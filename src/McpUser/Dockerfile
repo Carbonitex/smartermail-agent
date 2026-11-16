@@ -25,7 +25,7 @@ RUN dotnet test tests/SmarterMail.Tests/SmarterMail.Tests.csproj -c Release
 ARG VERSION=0.0.0-dev
 RUN dotnet publish src/McpUser/SmarterMailMcp.User.csproj -c Release -o /app -p:Version=$VERSION -p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:11.0
 WORKDIR /app
 COPY --from=build /app .
 # The image's built-in non-root user; the token file goes to /tmp.
